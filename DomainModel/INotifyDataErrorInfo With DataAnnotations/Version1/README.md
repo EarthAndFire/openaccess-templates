@@ -35,7 +35,8 @@ By enabling the *Generate Data Annotation Attributes* option of the Code Generat
 ### Prerequisites ###
 
 - Telerik OpenAccess ORM Q2 2013 or higher installed.
-- Visual Studio 2010 or higher.
+- Visual Studio 2012.
+- .NET Framework 4.5.
 
 ### Resources ###
 - <a href="http://www.telerik.com/products/orm/getting-started.aspx" target="_blank">Telerik OpenAccess ORM - Getting Started</a>
