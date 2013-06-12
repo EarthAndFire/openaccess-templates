@@ -8,6 +8,6 @@ This repository contains custom code generation templates with additional featur
 - Visual Studio 2010 or higher.
 
 ### Resources ###
-- [Telerik OpenAccess ORM - Getting Started](http://www.telerik.com/products/orm/getting-started.aspx "Getting Started")
-- [Telerik OpenAccess ORM - Community](http://www.telerik.com/community/forums/orm.aspx "Telerik OpenAccess ORM Forum")
-- [Telerik OpenAccess ORM - Use Custom Code Generation Templates](http://www.telerik.com/help/openaccess-orm/openaccess-tasks-customise-code-generation-overview.html "Customizing Code Generation Templates") 
+- <a href="http://www.telerik.com/products/orm/getting-started.aspx" target="_blank">Telerik OpenAccess ORM - Getting Started</a>
+- <a href="http://www.telerik.com/community/forums/orm.aspx" target="_blank">Telerik OpenAccess ORM - Community</a>
+- <a href="http://www.telerik.com/help/openaccess-orm/openaccess-tasks-customise-code-generation-overview.html" target="_blank">Telerik OpenAccess ORM - Use Custom Code Generation Templates</a>
