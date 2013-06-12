@@ -93,6 +93,12 @@ public class ClassGenerator : Telerik.OpenAccess.CodeGeneration.TelerikTextTrans
 #>
 #region INotifyDataErrorInfo Members
 
+<#+
+		if(this.isAttributesMapping)
+        {
+			this.attributesGenerator.GenerateTransientAttribute();
+		}
+#>
 protected IDictionary<String, List<String>> errors = new Dictionary<string, List<string>>();
 
 public event EventHandler<DataErrorsChangedEventArgs> ErrorsChanged;
@@ -107,6 +113,12 @@ public System.Collections.IEnumerable GetErrors(string propertyName)
     return this.errors[propertyName];
 }
 
+<#+
+		if(this.isAttributesMapping)
+        {
+			this.attributesGenerator.GenerateTransientAttribute();
+		}
+#>
 public bool HasErrors
 {
     get 
@@ -206,6 +218,12 @@ partial void Validate<#= property.Name #>(string propertyName, <#= property.ToTy
 #>
 #region DataAnnotationValidation
 
+<#+
+		if(this.isAttributesMapping)
+        {
+			this.attributesGenerator.GenerateTransientAttribute();
+		}
+#>
 protected IDictionary<String, List<String>> dataAnnotationErrors = new Dictionary<string, List<string>>();
 
 protected virtual void DataAnnotationValidate(string propertyName, object value)
