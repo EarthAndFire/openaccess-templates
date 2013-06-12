@@ -1,0 +1,364 @@
+﻿<#+
+public class ClassGenerator : Telerik.OpenAccess.CodeGeneration.TelerikTextTransformationBase
+{
+	protected AttributesGenerator attributesGenerator;
+	protected DocumentationGenerator documentationGenerator;
+	protected PropertiesGenerator propertiesGenerator;
+	protected bool isAttributesMapping;
+		
+	public ClassGenerator(TextTransformation rootGenerator, AttributesGenerator attributesGenerator, 
+		DocumentationGenerator documentationGenerator, PropertiesGenerator propertiesGenerator, Telerik.OpenAccess.Metadata.MappingDefinitionType mappingType)
+		:base(rootGenerator)
+    {
+		this.attributesGenerator = attributesGenerator;
+		this.documentationGenerator = documentationGenerator;
+		this.propertiesGenerator = propertiesGenerator;
+		this.isAttributesMapping = mappingType == Telerik.OpenAccess.Metadata.MappingDefinitionType.Attributes;
+	}
+
+	/// <summary>
+	/// Generates a class.
+	/// </summary>
+	/// <param name="@class">The class model.</param>
+	public void GenerateClass(Telerik.OpenAccess.CodeGeneration.CodeClass @class)
+	{
+		this.documentationGenerator.GenerateComments(@class.Comments);	
+		this.documentationGenerator.GenerateSummary(@class.Summary);
+		this.attributesGenerator.GenerateAttributes(@class.Attributes);
+		this.GenerateClassSignature(@class);
+#>
+{
+<#+ 
+		this.PushIndent("\t");
+		this.propertiesGenerator.GenerateProperties(@class);
+		
+		this.GenerateINotifyDataErrorInfoValidationMethods(@class);
+        if (@class.BaseClass == null)
+        {
+			this.GenerateINotifyDataErrorInfoMembers();
+            if (@class.Properties.Any(p => p.Attributes.Any(a => a.ImportNamespace == "System.ComponentModel.DataAnnotations")))
+            {
+				this.GenerateDataAnnotationValidationRegion();
+            }
+        }
+
+        if (@class.ImplementIDataErrorInfo)
+        {
+			if(@class.BaseClass == null)
+            {
+				this.GenerateIDataErrorInfoMembers();
+            }
+			else
+            {
+				this.GenerateIDataErrorInfoInDerivedClass();
+			}
+        }
+
+        if (@class.ImplementINotifyPropertyChanging && @class.BaseClass == null)
+        {
+			this.GenerateINotifyPropertyChangingMembers();
+        }
+
+        if (@class.ImplementINotifyPropertyChanged && @class.BaseClass == null)
+        {
+			this.GenerateINotifyPropertyChangedMembers();
+        }
+
+		this.PopIndent();
+#>
+}
+<#+ 
+	}
+
+	protected void GenerateClassSignature(Telerik.OpenAccess.CodeGeneration.CodeClass codeClass)
+	{
+		LinkedList<string> implements = new LinkedList<string>(codeClass.Implements.Select(i => i.Name));
+		if (codeClass.BaseClass != null)
+		{
+			implements.AddFirst(codeClass.BaseClass.Name);
+		}
+		var interfaceString = string.Join(", ", implements);
+
+		if (string.IsNullOrWhiteSpace(interfaceString) == false)
+		{
+			 interfaceString = " : " + interfaceString;
+		}
+#>
+<#= codeClass.TypeAccessModifier.ToCode() #><#= codeClass.TypeInheritanceModifier.ToCode() #> partial class <#= codeClass.Name #><#= interfaceString #>
+<#+
+	}
+
+	protected void GenerateINotifyDataErrorInfoMembers()
+    {
+#>
+#region INotifyDataErrorInfo Members
+
+protected IDictionary<String, List<String>> errors = new Dictionary<string, List<string>>();
+
+public event EventHandler<DataErrorsChangedEventArgs> ErrorsChanged;
+
+public System.Collections.IEnumerable GetErrors(string propertyName)
+{
+    if (String.IsNullOrEmpty(propertyName) || this.errors.ContainsKey(propertyName) == false) 
+	{
+		return null;
+	}
+
+    return this.errors[propertyName];
+}
+
+public bool HasErrors
+{
+    get 
+	{
+		bool hasErrors = this.errors.Count > 0;
+
+		return hasErrors; 
+	}
+}
+
+protected virtual void AddError(string propertyName, string error)
+{
+    if (this.errors.ContainsKey(propertyName) == false)
+    {
+        this.errors[propertyName] = new List<string>();
+    }
+
+    if (this.errors[propertyName].Contains(error) == false)
+    {
+        this.errors[propertyName].Add(error);
+        this.RaiseErrorsChanged(propertyName);
+    }
+}
+
+protected virtual void RemoveError(string propertyName, string error)
+{
+    if (this.errors.ContainsKey(propertyName) && this.errors[propertyName].Contains(error))
+    {
+        this.errors[propertyName].Remove(error);
+        if (this.errors[propertyName].Count == 0)
+        {
+            this.errors.Remove(propertyName);
+        }
+        
+		this.RaiseErrorsChanged(propertyName);
+    }
+}
+
+protected virtual void RaiseErrorsChanged(string propertyName)
+{
+    if (this.ErrorsChanged != null)
+    {
+        this.ErrorsChanged(this, new DataErrorsChangedEventArgs(propertyName));
+    }
+}
+
+#endregion
+
+<#+
+    }
+	
+	protected void GenerateINotifyDataErrorInfoValidationMethods(Telerik.OpenAccess.CodeGeneration.CodeClass @class)
+	{
+#>
+
+//To define your custom validation logic implement the target partial method in a partial class as shown below:
+/*
+public const string LestThanZeroMsg = "The Id cannot be less then 0";
+partial void ValidateId(string propertyName, int newValue)
+{
+    if (newValue < 0)
+	{
+        this.AddError(propertyName, LestThanZeroMsg);
+	}
+    else
+	{
+        this.RemoveError(propertyName, LestThanZeroMsg);
+	}
+}
+*/
+#region INotifyDataErrorInfo Validation Methods
+
+<#+
+		foreach(var property in @class.Properties)
+		{
+            if (property.HasSetter && property.IsNavigationProperty == false &&  property.IsAbstract == false)
+            {
+				this.GenerateValidationMethod(property);
+            }
+		}
+#>
+#endregion
+
+<#+
+	}
+	
+	protected void GenerateValidationMethod(Telerik.OpenAccess.CodeGeneration.CodeProperty property)
+	{
+#>
+partial void Validate<#= property.Name #>(string propertyName, <#= property.ToTypeString() #> newValue);
+
+<#+
+	}
+
+	protected void GenerateDataAnnotationValidationRegion()
+    {
+#>
+#region DataAnnotationValidation
+
+protected IDictionary<String, List<String>> dataAnnotationErrors = new Dictionary<string, List<string>>();
+
+protected virtual void DataAnnotationValidate(string propertyName, object value)
+{
+    List<System.ComponentModel.DataAnnotations.ValidationResult> validationResults = new List<System.ComponentModel.DataAnnotations.ValidationResult>();
+
+    Validator.TryValidateProperty(
+        value,
+        new ValidationContext(this, null, null) { MemberName = propertyName },
+        validationResults);
+
+    this.AddDataAnnotationErrors(propertyName, validationResults);
+}
+
+private void AddDataAnnotationErrors(string propertyName, List<System.ComponentModel.DataAnnotations.ValidationResult> validationResults)
+{
+    List<string> oldErrors;
+    if (this.dataAnnotationErrors.TryGetValue(propertyName, out oldErrors))
+    {
+        IEnumerable<string> errorsToRemove = from err in oldErrors
+                                                where validationResults.Any(vr => string.Equals(vr.ErrorMessage, err, StringComparison.OrdinalIgnoreCase)) == false
+                                                select err;
+
+        foreach (string missingError in errorsToRemove)
+        {
+            this.RemoveError(propertyName, missingError);
+        }
+    }
+
+    foreach (System.ComponentModel.DataAnnotations.ValidationResult vr in validationResults)
+    {
+        this.AddError(propertyName, vr.ErrorMessage);
+    }
+
+    this.dataAnnotationErrors[propertyName] = validationResults.Select(vr => vr.ErrorMessage).ToList();
+}
+
+#endregion
+
+<#+
+    }
+
+	protected void GenerateIDataErrorInfoMembers()
+    {
+#>
+#region IDataErrorInfo members
+
+<#+
+		if(this.isAttributesMapping)
+        {
+			this.attributesGenerator.GenerateTransientAttribute();
+		}
+#>
+private string error = string.Empty;
+<#+
+		if(this.isAttributesMapping)
+        {
+			this.attributesGenerator.GenerateTransientAttribute();
+		}
+#>
+public string Error
+{
+	get
+	{
+		return this.error;
+	}
+}
+
+<#+
+		if(this.isAttributesMapping)
+        {
+			this.attributesGenerator.GenerateTransientAttribute();
+		}
+#>
+public string this[string propertyName]
+{
+	get
+	{
+		this.ValidatePropertyInternal(propertyName, ref this.error);
+
+		return this.error;
+	}
+}
+
+protected virtual void ValidatePropertyInternal(string propertyName, ref string error)
+{
+    this.ValidateProperty(propertyName, ref error);
+}
+
+// Please implement this method in a partial class in order to provide the error message depending on each of the properties.
+partial void ValidateProperty(string propertyName, ref string error);
+
+#endregion
+
+<#+
+    }
+
+	protected void GenerateIDataErrorInfoInDerivedClass()
+    {
+#>
+#region IDataErrorInfo members
+
+protected override void ValidatePropertyInternal(string propertyName, ref string error)
+{
+    this.ValidateProperty(propertyName, ref error);
+}
+
+// Please implement this method in a partial class in order to provide the error message depending on each of the properties.
+partial void ValidateProperty(string propertyName, ref string error);
+
+#endregion
+
+<#+
+    }
+
+	protected void GenerateINotifyPropertyChangingMembers()
+	{
+#>
+#region INotifyPropertyChanging members
+
+public event PropertyChangingEventHandler PropertyChanging;
+
+protected virtual void OnPropertyChanging(string propertyName)
+{
+	if(this.PropertyChanging != null)
+	{
+		this.PropertyChanging(this, new PropertyChangingEventArgs(propertyName));
+	}
+}
+
+#endregion
+
+<#+
+    }
+
+	protected void GenerateINotifyPropertyChangedMembers()
+    {
+#>
+#region INotifyPropertyChanged members
+
+public event PropertyChangedEventHandler PropertyChanged;
+
+protected virtual void OnPropertyChanged(string propertyName)
+{
+	if(this.PropertyChanged != null)
+	{
+		this.PropertyChanged(this, new PropertyChangedEventArgs(propertyName));
+	}
+}
+
+#endregion
+
+<#+
+	}
+}
+#>

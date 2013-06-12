@@ -1,0 +1,210 @@
+﻿<#+
+public class ContextGenerator: TelerikTextTransformationBase
+{
+	protected const string IUnitOfWorkName = "IUnitOfWork";
+	protected AttributesGenerator attributesGenerator;
+	protected DocumentationGenerator documentationGenerator;
+	protected InterfacesGenerator interfacesGenerator;
+	protected DomainMethodsGenerator domainMethodGenerator;
+	protected string templateFile;
+
+	public ContextGenerator(TextTransformation rootGenerator, 
+		AttributesGenerator attributesGenerator,
+		DocumentationGenerator documentationGenerator,
+		InterfacesGenerator interfacesGenerator,
+		DomainMethodsGenerator domainMethodGenerator,
+		string templateFile)
+		:base(rootGenerator)
+    {
+		this.attributesGenerator = attributesGenerator;
+		this.documentationGenerator = documentationGenerator;
+		this.domainMethodGenerator = domainMethodGenerator;
+		this.interfacesGenerator = interfacesGenerator;
+		this.templateFile = templateFile;
+    }
+
+	/// <summary>
+	/// Generates a context class.
+	/// </summary>
+	/// <param name="contextClass">The context class model.</param>
+	public void GenerateContextClass(Telerik.OpenAccess.CodeGeneration.ContextClass contextClass)
+	{
+		this.documentationGenerator.GenerateComments(contextClass.Comments);	
+		this.documentationGenerator.GenerateSummary(contextClass.Summary);
+		this.attributesGenerator.GenerateAttributes(contextClass.Attributes);
+		this.GenerateContextClassSignature(contextClass);
+		this.PushIndent("\t");
+		this.GenerateConstructorsAndMappingSource(contextClass);
+		this.GenerateEndpoints(contextClass);
+		this.GenerateReroutedMethods();
+		this.domainMethodGenerator.GenerateDomainMethods(contextClass);
+		this.GenerateBackendConfiguration(contextClass);
+		this.PopIndent();
+#>
+End Class
+
+<#+
+	}
+
+	protected void GenerateContextClassSignature(Telerik.OpenAccess.CodeGeneration.ContextClass contextClass)
+	{
+#>
+<#= contextClass.TypeAccessModifier.ToCode() #><#= contextClass.TypeInheritanceModifier.ToCode() #> Partial Class <#= contextClass.Name #>
+	Inherits <#= contextClass.BaseClass.Name #>
+	Implements <#= contextClass.IUnitOfWorkInterface.Name #>
+<#+
+	}
+
+	protected void GenerateConstructorsAndMappingSource(Telerik.OpenAccess.CodeGeneration.ContextClass contextClass)
+	{
+#>
+Private Shared connectionStringName As String = "<#= contextClass.ConnectionStringId #>"
+
+Private Shared backend As BackendConfiguration = GetBackendConfiguration()
+<#+
+		this.GenerateMappingSourceDefinition(contextClass);
+#>
+
+Public Sub New()
+	MyBase.New(connectionStringName, backend, metadataSource)
+End Sub
+	
+Public Sub New(ByVal connection As String)
+	MyBase.New(connection, backend, metadataSource)
+End Sub
+	
+Public Sub New(ByVal backendConfiguration As BackendConfiguration)
+	MyBase.New(connectionStringName, backendConfiguration, metadataSource)
+End Sub
+		
+Public Sub New(ByVal connection As String, ByVal metadataSource As MetadataSource)
+	MyBase.New(connection, backend, metadataSource)
+End Sub
+		
+Public Sub New(ByVal connection As String, ByVal backendConfiguration As BackendConfiguration, ByVal metadataSource As MetadataSource)
+	MyBase.New(connection, backendConfiguration, metadataSource)
+End Sub
+	
+<#+
+	}
+
+	protected void GenerateMappingSourceDefinition(Telerik.OpenAccess.CodeGeneration.ContextClass contextClass)
+	{
+		if(contextClass.MappingType.HasFlag(MappingDefinitionType.Xml))
+		{
+			string xmlFileName = contextClass.RlinqResourceName;
+			if(string.IsNullOrEmpty(xmlFileName))
+			{
+				xmlFileName = Path.GetFileName(templateFile);
+#>		
+Private Shared metadataSource As MetadataSource = XmlMetadataSource.FromAssemblyResource("<#= xmlFileName #>")
+<#+
+			}
+			else
+			{
+#>		
+Private Shared [assemblyName] As System.Reflection.AssemblyName = new System.Reflection.AssemblyName("<#= contextClass.RlinqAssemblyName #>")
+Private Shared [assembly] As System.Reflection.Assembly = System.Reflection.Assembly.Load([assemblyName])
+
+Private Shared metadataSource As MetadataSource = XmlMetadataSource.FromAssemblyResource([assembly], "<#= xmlFileName #>")
+<#+
+			}
+		}
+		else if(contextClass.MappingType.HasFlag(MappingDefinitionType.Attributes))
+		{
+#>		
+Private Shared metadataSource As MetadataSource = AttributesMetadataSource.FromContext(GetType(<#= contextClass.Name #>))
+<#+
+		}
+		else if(contextClass.MappingType.HasFlag(MappingDefinitionType.Fluent))
+		{
+#>		
+Private Shared metadataSource As MetadataSource = New <#= contextClass.FluentMetadataSourceName #>()
+<#+
+		}
+	}
+
+	protected void GenerateEndpoints(Telerik.OpenAccess.CodeGeneration.ContextClass contextClass)
+	{
+		foreach(Telerik.OpenAccess.CodeGeneration.CodeProperty property in contextClass.Properties)
+		{
+			if(contextClass.AllowedEndpoints.Contains(property.Type))
+            {
+#>
+Public ReadOnly Property <#= property.Name #>() As  <#= property.ToTypeString() #> Implements <#= contextClass.IUnitOfWorkInterface.Name #>.<#= property.Name #>
+    Get
+		Return Me.GetAll(Of <#= property.Type #>)()
+    End Get
+End Property
+
+<#+
+            }
+		}
+	}
+
+	protected void GenerateReroutedMethods()
+    {
+#>
+Public Sub Reroute_Add(entity As Object) Implements <#= ContextGenerator.IUnitOfWorkName #>.Add
+	Me.Add(entity)
+End Sub
+
+Public Sub Reroute_ClearChanges() Implements <#= ContextGenerator.IUnitOfWorkName #>.ClearChanges
+	Me.ClearChanges()
+End Sub
+
+Public Sub Reroute_Delete(entity As Object) Implements <#= ContextGenerator.IUnitOfWorkName #>.Delete
+	Me.Delete(entity)
+End Sub
+
+Public Function Reroute_GetAll(Of T)() As System.Linq.IQueryable(Of T) Implements <#= ContextGenerator.IUnitOfWorkName #>.GetAll
+	Return Me.GetAll(Of T)()
+End Function
+
+Public Function Reroute_GetObjectByKey(Of T)(key As Telerik.OpenAccess.ObjectKey) As T Implements <#= ContextGenerator.IUnitOfWorkName #>.GetObjectByKey
+	Return CType(Me.GetObjectByKey(key), T)
+End Function
+
+Public Sub Reroute_SaveChanges() Implements <#= ContextGenerator.IUnitOfWorkName #>.SaveChanges
+	Me.SaveChanges()
+End Sub
+<#+ 
+    }
+
+	protected void GenerateBackendConfiguration(ContextClass contextClass)
+	{
+#>
+Public Shared Function GetBackendConfiguration() As BackendConfiguration
+	Dim backend As BackendConfiguration = New BackendConfiguration()
+<#+ 
+		this.PushIndent("\t");
+		this.GenerateBackendConfiguratioin(contextClass);
+		this.GenerateAdditionalBackendSettings(contextClass.BackendConfiguration);
+		this.PopIndent();
+#>
+	Return backend
+End Function
+<#+ 
+	}
+
+	protected void GenerateBackendConfiguratioin(ContextClass contextClass)
+	{
+        foreach (var setting in contextClass.BackendConfigurationSettings)
+        {
+#>
+<#= setting.Key #> = <#= setting.Value #>
+<#+ 	
+        }
+	}
+
+	protected void GenerateAdditionalBackendSettings(BackendConfiguration currentBackend)
+	{
+		foreach (string query in currentBackend.ConnectionPool.InitSQL)
+		{
+#>
+backend.ConnectionPool.InitSQL.Add("<#= query #>")
+<#+ 
+		}
+	}
+}
+#>
