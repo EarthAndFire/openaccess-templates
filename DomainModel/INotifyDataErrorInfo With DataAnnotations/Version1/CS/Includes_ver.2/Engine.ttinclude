@@ -69,6 +69,8 @@ public class Engine : TelerikTextTransformationBase
 		{
 			foreach(Telerik.OpenAccess.CodeGeneration.CodeClass @class in @namespace.Classes)
 			{
+				@class.AddInterface(new Telerik.OpenAccess.CodeGeneration.CodeInterface(){Name = "INotifyDataErrorInfo"});
+			
 				string fileName = Path.ChangeExtension(@class.Name, this.template.DefaultExtension);
 				this.template.TemplateContext.StartNewFileBlock(fileName, @class.Namespace); 
 				if (this.template.GenerateMultipleFiles)
