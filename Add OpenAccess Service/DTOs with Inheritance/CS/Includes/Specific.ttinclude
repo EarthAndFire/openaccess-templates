@@ -1,0 +1,939 @@
+﻿<#+
+	private void GenerateDtos()
+	{
+		foreach (Telerik.OpenAccess.CodeGeneration.CodeNamespace @namespace in this.codegenModel.Namespaces)
+		{
+			foreach (Telerik.OpenAccess.CodeGeneration.CodeClass @class in @namespace.Classes)
+			{
+				var derivedClasses = GetDerivedClasses(@class);
+				this.GenerateDto(@class, derivedClasses);
+			}
+		}
+	}
+
+	private List<Telerik.OpenAccess.CodeGeneration.CodeClass> GetDerivedClasses(Telerik.OpenAccess.CodeGeneration.CodeClass baseClass)
+    {
+		var derivedClasses = new List<Telerik.OpenAccess.CodeGeneration.CodeClass>();
+
+		foreach(var ns in this.codegenModel.Namespaces)
+        {
+			foreach (var c in ns.Classes)
+			{
+				if(c.BaseClass != null && c.BaseClass.Name == baseClass.Name)
+					derivedClasses.Add(c);
+			}
+		}
+
+		return derivedClasses;
+	}
+	
+	private void GenerateServices()
+	{
+		foreach (Telerik.OpenAccess.CodeGeneration.CodeNamespace @namespace in this.codegenModel.Namespaces)
+		{
+			foreach (Telerik.OpenAccess.CodeGeneration.CodeClass @class in @namespace.Classes)
+			{
+				this.GenerateServiceInterface(@class);
+				this.GenerateService(@class);
+			}
+		}
+	}
+	
+	private void GenerateRepositories()
+	{
+		foreach (Telerik.OpenAccess.CodeGeneration.CodeNamespace @namespace in this.codegenModel.Namespaces)
+		{
+			foreach (Telerik.OpenAccess.CodeGeneration.CodeClass @class in @namespace.Classes)
+			{
+				this.GenerateRepositoryInterface(@class);
+				this.GenerateRepository(@class);
+			}
+		}
+	}
+	
+	private void GenerateAssemblers()
+	{
+		foreach (Telerik.OpenAccess.CodeGeneration.CodeNamespace @namespace in this.codegenModel.Namespaces)
+		{
+			foreach (Telerik.OpenAccess.CodeGeneration.CodeClass @class in @namespace.Classes)
+			{
+				this.GenerateAssemblerInterface(@class);
+				this.GenerateBaseAssembler(@class);
+				this.GenerateDerivedAssembler(@class);
+			}
+			 
+		}
+	}
+	
+	private void GenerateDtoWithKeyInterface()
+	{
+#>
+public interface <#= this.nameService.DtoWithKeyInterfaceName #>
+{
+	string <#= this.nameService.DtoKeyPropertyName #> { get; set; }
+}
+
+<#+
+	}
+
+	private void GenerateDto(Telerik.OpenAccess.CodeGeneration.CodeClass @class, List<Telerik.OpenAccess.CodeGeneration.CodeClass> derivedClasses)
+	{
+		this.GenerateWcfContract(@class);
+
+		foreach(var c in derivedClasses)
+			this.GenerateKnownType(c);
+		
+		string derivedTypes = this.nameService.DtoWithKeyInterfaceName;
+		if(@class.BaseClass != null)
+		{
+			string baseClssDtoName = this.nameService.GetDTOName(@class.BaseClass.Name);
+			derivedTypes = baseClssDtoName + ", " + derivedTypes;
+        }
+#>
+public partial class <#= this.nameService.GetDTOName(@class.Name) #> : <#= derivedTypes #>
+{
+	public <#= this.nameService.GetDTOName(@class.Name) #>()
+	{
+	}
+	
+	public <#= this.nameService.GetDTOName(@class.Name) #>(<#= this.InitializeConstructorParams(@class) #>)
+	{
+	<#+
+			this.PushIndent("\t\t");
+			this.Write("\t");
+			@class.Properties.ForEach(
+				property => 
+				{
+					PropertyDetail details = this.GeneratePropertyDetail(property);
+					this.WriteLine(string.Format("this.{0} = {1};", details.propertyName, details.fieldName));
+				});
+			this.PopIndent();
+	#>
+	}
+<#+	if(@class.BaseClass == null)
+    {
+#>
+	[DataMember]
+	public virtual string <#= this.nameService.DtoKeyPropertyName #> { get; set; }
+
+<#+
+    }
+    this.GenerateProperties(@class.Properties);
+#>
+}
+
+<#+ 
+	}
+
+	/// <summary>
+	/// Generates the attributes definition.
+	/// </summary>
+	/// <param name="properties">The list of properties.</param>
+	private void GenerateProperties(System.Collections.Generic.IEnumerable<Telerik.OpenAccess.CodeGeneration.CodeProperty> properties)
+	{
+		PushIndent("\t");
+		//ProcessPropertiesIfAutoImplementedSettingIsOn(properties);
+		properties.ForEach(
+			property => 
+			{
+				GenerateProperty(property);
+			});
+
+		PopIndent();
+	}
+	
+	/// <summary>
+	/// Generates a property definition.
+	/// </summary>
+	/// <param name="property">CodeProperty instance to generate.</param>
+	private void GenerateProperty(Telerik.OpenAccess.CodeGeneration.CodeProperty property)
+	{
+		// we set the field name to empty so that we generate auto properties
+		property.FieldName = string.Empty;
+		
+		PropertyDetail details = this.GeneratePropertyDetail(property);
+		if(!details.areModifiersCompatible) 
+		{
+			details.errorMessage =  utilities.Context.GetIncompatibleModifiersErrorMessage(property, this.Host.TemplateFile);
+			details.propertyErrorMessage = utilities.Context.GetPropertyErrorMessageForIncompatibleModifiers(property.Name, "private", "abstract");
+		}
+			
+		this.GenerateProperty(details);
+	}
+	
+/// <summary>
+/// Generates a property definition.
+/// </summary>
+/// <param name="property">CodeProperty instance to generate.</param>
+private void GenerateProperty(PropertyDetail details)
+{
+	//GenerateSummary(details.summary);
+	if (!details.areModifiersCompatible)
+	{
+		this.WriteLine("//TODO: Please, resolve the following error: {0}", details.propertyErrorMessage);
+		this.Error(details.errorMessage);
+	}			
+	//Generates the DataMember attribute.
+    this.WriteLine("[DataMember]");
+	// generates the property signature
+	this.Write(string.Format("{0} {1} {2}", details.modifiers, details.propertyType, details.propertyName));
+		if (details.useField)
+		{
+			this.WriteLine(string.Empty);
+		}
+		else
+		{
+			this.Write(" ");
+		}
+#>{<#+
+// we always generate getters on the DTOs
+//if(details.hasGetter)
+//{		
+	if (details.useField)
+			this.WriteLine(string.Empty);
+			this.Write(" ");
+#>get<#+	
+	if (details.useField)
+	{
+		this.WriteLine(string.Empty);
+	#>
+    {
+        return this.<#= details.fieldName #>;
+    }
+<#+			 
+	}
+	else
+	{
+#>;<#+	
+	}
+//}
+// we always generate setters on the DTOs
+//if(details.hasSetter)
+//{
+	if (details.useField)
+		this.Write(" ");
+#>set<#+	
+	if (details.useField)
+	{
+		this.WriteLine(string.Empty);
+	#>
+    {
+        this.<#= details.fieldName #> = value;
+    }
+<#+			 
+	}
+	else
+	{
+#>;<#+
+		this.Write(" ");
+	}
+//}
+#>}
+<#+
+ 	if (details.useField)
+	{ 
+		// generates the field signature
+		this.WriteLine(string.Format("{0} {1} {2} = {3};", details.fieldModifier, details.propertyType, details.fieldName, details.initialValue));
+		} 
+	this.WriteLine(string.Empty);
+}
+
+	private void GenerateUnitOfWorkDerivateInterface()
+	{
+#>
+public partial interface <#= this.nameService.SpecificUnitOfWorkInterfaceName #> : <#= this.nameService.UnitOfWorkInterfaceName #>
+{
+<#+
+			
+			this.PushIndent("\t");
+			foreach (KeyValuePair<string, string> endpoint in this.contextClassInfo.Endpoints)
+			{
+				string format = "IQueryable<{0}> {1} {{ get; }}";
+				string property = string.Format(format, endpoint.Key, endpoint.Value);
+				this.WriteLine(property);
+				this.WriteLine("");
+			}
+			this.PopIndent();
+#>
+}
+<#+	
+	}
+		
+	private void GenerateContextPartial()
+	{
+#>
+
+public partial class <#= this.contextClassInfo.Name #> : <#= this.nameService.SpecificUnitOfWorkInterfaceName #>
+{
+
+}
+<#+
+	}
+	
+	private void GenerateContextFactory()
+	{
+#>
+
+public class <#= this.nameService.ContextFactoryName #>
+{
+    private static <#= this.nameService.ContextFactoryName #> instance;
+    public static <#= this.nameService.ContextFactoryName #> Instance
+    {
+        get
+        {
+            if (<#= this.nameService.ContextFactoryName #>.instance == null)
+            {
+                <#= this.nameService.ContextFactoryName #>.instance = new <#= this.nameService.ContextFactoryName #>();
+            }
+            return <#= this.nameService.ContextFactoryName #>.instance;
+        }
+        set
+        {
+            <#= this.nameService.ContextFactoryName #>.instance = value;
+        }
+    }
+
+    public virtual <#= this.nameService.SpecificUnitOfWorkInterfaceName #> GetContextPerRequest()
+    {
+        HttpContext httpContext = HttpContext.Current;
+        if (httpContext == null)
+        {
+            return new <#= this.contextClassInfo.Name #>();
+        }
+        else
+        {
+            int contextId = Thread.CurrentContext.ContextID;
+            int hashCode = httpContext.GetHashCode();
+            string key = string.Concat(hashCode, contextId);
+
+            <#= this.nameService.SpecificUnitOfWorkInterfaceName #> context = httpContext.Items[key] as <#= this.nameService.SpecificUnitOfWorkInterfaceName #>;
+            if (context == null)
+            {
+                context = new <#= this.contextClassInfo.Name #>();
+                httpContext.Items[key] = context;
+            }
+            return context;
+        }
+    }
+}
+<#+
+	}
+	
+	private void GenerateRepositoryInterface()
+	{	
+#>
+
+public partial interface IRepository<TEntity>
+{
+    void Add(TEntity entity);
+    void Remove(TEntity entity);
+
+    TEntity Get(ObjectKey objectKey);
+    
+    IQueryable<TEntity> GetAll();
+
+    IQueryable<TEntity> Find(Expression<Func<TEntity, bool>> predicate);
+}
+<#+
+	}
+	
+	private void GenerateRepositoryBase()
+	{
+#>
+
+public partial class Repository<TEntity> : IRepository<TEntity>
+        where TEntity : class
+{
+    protected IUnitOfWork unitOfWork;
+
+    public Repository(IUnitOfWork unitOfWork)
+    {
+        this.unitOfWork = unitOfWork;
+    }
+
+    public void Add(TEntity entity)
+    {
+		this.unitOfWork.Add(entity);
+    }
+
+    public void Remove(TEntity entity)
+    {
+        this.unitOfWork.Delete(entity);
+    }
+
+    public IQueryable<TEntity> GetAll()
+    {
+        return this.unitOfWork.GetAll<TEntity>();
+    }
+
+    public TEntity Get(ObjectKey objectKey)
+    {
+        return this.unitOfWork.GetObjectByKey<TEntity>(objectKey);
+    }
+
+    public IQueryable<TEntity> Find(Expression<Func<TEntity, bool>> predicate)
+    {
+        return this.unitOfWork.GetAll<TEntity>().Where(predicate);
+    }
+}
+<#+	
+	}
+	
+	private void GenerateRepositoryInterface(Telerik.OpenAccess.CodeGeneration.CodeClass @class)
+	{
+#>
+
+public partial interface <#= this.nameService.GetRepositoryInterfaceName(@class.Name) #> : IRepository<<#= @class.Name #>>
+{ 
+
+}
+<#+
+	}
+	
+	private void GenerateRepository(Telerik.OpenAccess.CodeGeneration.CodeClass @class)
+	{
+#>
+
+public partial class <#= this.nameService.GetRepositoryName(@class.Name) #> : Repository<<#= @class.Name #>>, <#= this.nameService.GetRepositoryInterfaceName(@class.Name) #>
+{
+    public <#= this.nameService.GetRepositoryName(@class.Name) #>(<#= this.nameService.SpecificUnitOfWorkInterfaceName #> unitOfWork)
+        : base(unitOfWork)
+    {
+    }
+}
+<#+ 
+
+	}
+	
+	private void GenerateServiceInterface()
+	{	
+#>
+
+public partial interface IService<TDto, TEntity>
+    where TEntity : class
+	where TDto : <#= this.nameService.DtoWithKeyInterfaceName #>
+{
+    IAssembler<TDto, TEntity> Assembler { get; }
+    IRepository<TEntity> Repository { get; }
+
+    IEnumerable<TDto> Find(Expression<Func<TEntity, bool>> filter);
+    IEnumerable<TDto> GetAll();
+	
+	IEnumerable<TDto> Find(int startRowIndex, int maximumRows);
+    IEnumerable<TDto> Find(string sortExpression, string filterExpression);
+    IEnumerable<TDto> Find(int? startRowIndex, int? maximumRows, string sortExpression, string filterExpression);
+    
+	int Count();
+    int Count(string filterExpression);
+	
+	TDto GetByKey(string dtoKey);
+    string Add(TDto dto);
+	void Update(TDto dto);
+    void Delete(TDto dto);	
+}
+<#+
+	}
+	
+	private void GenerateServiceBase()
+	{
+#>
+
+public abstract partial class Service<TDto, TEntity> : IService<TDto, TEntity>
+    where TEntity : class
+	where TDto : <#= this.nameService.DtoWithKeyInterfaceName #>
+{
+    IAssembler<TDto, TEntity> assembler;
+    IRepository<TEntity> repository;
+
+    public Service(IAssembler<TDto, TEntity> assembler,
+        IRepository<TEntity> repository)
+    {
+        this.assembler = assembler;
+        this.repository = repository;
+    }
+
+    public IAssembler<TDto, TEntity> Assembler 
+    { 
+        get 
+        {
+            return this.assembler; 
+        } 
+    }
+
+    public IRepository<TEntity> Repository 
+    { 
+        get 
+        {
+            return this.repository; 
+        }
+    }
+	
+	public virtual IEnumerable<TDto> GetAll()
+    {
+        return this.assembler.Assemble(this.Repository.GetAll());
+    }
+
+    public virtual IEnumerable<TDto> Find(Expression<Func<TEntity, bool>> filter)
+    {
+        return this.Assembler.Assemble(this.Repository.Find(filter));
+    }
+
+    public virtual IEnumerable<TDto> Find(int startRowIndex, int maximumRows)
+    {
+        return this.Find(startRowIndex, maximumRows, null, null);
+    }
+
+    public virtual IEnumerable<TDto> Find(string sortExpression, string filterExpression)
+    {
+        return this.Find(null, null, sortExpression, filterExpression);
+    }
+
+    public virtual IEnumerable<TDto> Find(int? startRowIndex, int? maximumRows, string sortExpression, string filterExpression)
+    {
+        IQueryable<TEntity> query = this.Repository.GetAll();
+
+        if (!string.IsNullOrEmpty(filterExpression))
+        {
+            query = query.Where(filterExpression);
+        }
+        if (!string.IsNullOrEmpty(sortExpression))
+        {
+            query = query.OrderBy(sortExpression);
+        }
+        if (startRowIndex.HasValue)
+        {
+            query = query.Skip(startRowIndex.Value);
+        }
+        if (maximumRows.HasValue)
+        {
+            query = query.Take(maximumRows.Value);
+        }
+
+        return this.Assembler.Assemble(query);
+    }
+
+    public virtual int Count()
+    {
+        return this.Count(string.Empty);
+    }
+
+    public virtual int Count(string filterExpression)
+    {
+        IQueryable<TEntity> query = this.Repository.GetAll();
+
+        if (!string.IsNullOrEmpty(filterExpression))
+        {
+            query = query.Where(filterExpression);    
+        }
+
+        return query.Count();
+    }
+
+    
+    public virtual TDto GetByKey(string dtoKey)
+    {
+        ObjectKey key = KeyUtility.Instance.Convert<TEntity>(dtoKey);
+		
+        return this.assembler.Assemble(this.Repository.Get(key));
+    }
+
+    public virtual string Add(TDto dto)
+    {
+        TEntity entity = this.assembler.Assemble(null, dto);
+
+        this.repository.Add(entity);
+
+        ObjectKey key = KeyUtility.Instance.Create(entity);
+
+        return KeyUtility.Instance.Convert(key);
+    }
+
+    public virtual void Update(TDto dto)
+    {
+        ObjectKey key = KeyUtility.Instance.Convert<TEntity>(dto.<#= this.nameService.DtoKeyPropertyName #>);
+        TEntity entity = this.repository.Get(key);
+
+        this.assembler.Assemble(entity, dto);
+    }
+
+    public virtual void Delete(TDto dto)
+    {
+		ObjectKey key = KeyUtility.Instance.Convert<TEntity>(dto.<#= this.nameService.DtoKeyPropertyName #>);
+        TEntity entity = this.repository.Get(key);
+
+        this.Repository.Remove(entity);
+    }
+}
+<#+	
+	}
+	
+	private void GenerateServiceInterface(Telerik.OpenAccess.CodeGeneration.CodeClass @class)
+	{
+#>
+
+public partial interface <#= this.nameService.GetServiceInterfaceName(@class.Name) #> : IService<<#= this.nameService.GetDTOName(@class.Name) #>, <#= @class.Name #>>
+{
+
+}
+<#+
+	}
+	
+	private void GenerateService(Telerik.OpenAccess.CodeGeneration.CodeClass @class)
+	{
+#>
+
+public partial class <#= this.nameService.GetServiceName(@class.Name) #> : Service<<#= this.nameService.GetDTOName(@class.Name) #>, <#= @class.Name #>>, <#= this.nameService.GetServiceInterfaceName(@class.Name) #>
+{
+    public <#= this.nameService.GetServiceName(@class.Name) #>(<#= this.nameService.GetAssemblerInterfaceName(@class.Name) #> assembler, <#= this.nameService.GetRepositoryInterfaceName(@class.Name) #> repository)
+        : base(assembler, repository)
+    {
+
+    }
+}
+<#+ 
+
+	}
+	
+		private void GenerateBaseAssembler()
+	{	
+		#>
+		
+public partial interface IAssembler<TDto, TEntity>
+    where TEntity : class
+{
+    TDto Assemble(TEntity entity);
+    TEntity Assemble(TEntity entity, TDto dto);
+
+	void AssembleBaseDto(TEntity entity, TDto dto);
+    void AssembleBaseEntity(TEntity entity, TDto dto);
+
+    IEnumerable<TDto> Assemble(IEnumerable<TEntity> entityList);
+    IEnumerable<TEntity> Assemble(IEnumerable<TDto> dtoList);
+}
+
+public abstract class Assembler<TDto, TEntity> : IAssembler<TDto, TEntity>
+    where TEntity : class
+{
+    public abstract TDto Assemble(TEntity domainEntity);
+    public abstract TEntity Assemble(TEntity entity, TDto dto);
+
+    public void AssembleNavigational(TEntity entity, TDto dto)
+    {
+    	this.AssembleReferences(entity, dto);
+    	this.AssembleCollections(entity, dto);
+    }
+
+	public abstract void AssembleBaseDto(TEntity entity, TDto dto);
+	public abstract void AssembleBaseEntity(TEntity entity, TDto dto);
+
+    public abstract void AssembleReferences(TEntity entity, TDto dto);
+    public abstract void AssembleCollections(TEntity entity, TDto dto);
+
+
+    public virtual IEnumerable<TDto> Assemble(IEnumerable<TEntity> domainEntityList)
+    {
+        List<TDto> dtos = Activator.CreateInstance<List<TDto>>();
+        foreach (TEntity domainEntity in domainEntityList)
+        {
+            dtos.Add(Assemble(domainEntity));
+        }
+        return dtos;
+    }
+
+    public virtual IEnumerable<TEntity> Assemble(IEnumerable<TDto> dtoList)
+    {
+        List<TEntity> domainEntities = Activator.CreateInstance<List<TEntity>>();
+        foreach (TDto dto in dtoList)
+        {
+            domainEntities.Add(Assemble(null, dto));
+        }
+        return domainEntities;
+    }
+}
+<#+
+	}
+	
+		private void GenerateAssemblerInterface(Telerik.OpenAccess.CodeGeneration.CodeClass @class)
+	{
+#>
+
+public partial interface <#= this.nameService.GetAssemblerInterfaceName(@class.Name) #> : IAssembler<<#= this.nameService.GetDTOName(@class.Name) #>, <#= @class.Name #>>
+{ 
+
+}
+<#+
+	}
+	
+	private void GenerateBaseAssembler(Telerik.OpenAccess.CodeGeneration.CodeClass @class)
+	{
+#>
+
+public partial class <#= this.nameService.GetAssemblerBaseName(@class.Name) #> : Assembler<<#= this.nameService.GetDTOName(@class.Name) #>, <#= @class.Name #>>
+{
+<#+
+	if(@class.BaseClass != null)
+    {
+		string baseTypeAssembler = this.nameService.GetAssemblerName(@class.BaseClass.Name);
+		this.WriteLine(string.Format("	{0} baseAssembler = new {0}();", baseTypeAssembler));
+	}
+#>	
+	/// <summary>
+    /// Invoked after the <#= this.nameService.GetDTOName(@class.Name) #> instance is assembled.
+    /// </summary>
+    /// <param name="dto"><see cref="<#= this.nameService.GetDTOName(@class.Name) #>"/> The Dto instance.</param>
+	partial void OnDTOAssembled(<#= this.nameService.GetDTOName(@class.Name) #> dto);
+
+	/// <summary>
+    /// Invoked after the <#= @class.Name #> instance is assembled.
+    /// </summary>
+    /// <param name="entity">The <see cref="<#= @class.Name #>"/> instance.</param>
+	partial void OnEntityAssembled(<#= @class.Name #> entity);
+	
+    public override <#= @class.Name #> Assemble(<#= @class.Name #> entity, <#= this.nameService.GetDTOName(@class.Name) #> dto)
+    {
+        if (entity == null)
+        {
+            entity = new <#= @class.Name #>();
+        }
+		
+<#+
+		this.PushIndent("\t\t");
+		foreach (Telerik.OpenAccess.CodeGeneration.CodeProperty @property in @class.Properties)
+		{
+			if(this.nameService.IsPrimitive(@property) && @property.HasSetter)
+			{
+				this.WriteLine(string.Format("entity.{0} = dto.{0};", @property.Name));
+			}
+		}
+		if(@class.BaseClass != null)
+        {
+			this.WriteLine("baseAssembler.AssembleBaseEntity(entity, dto);");
+		}
+		this.PopIndent();
+#>
+        this.OnEntityAssembled(entity);
+        return entity;
+    }
+
+	public override void AssembleBaseEntity(<#= @class.Name #> entity, <#= this.nameService.GetDTOName(@class.Name) #> dto)
+    {
+<#+
+		this.PushIndent("\t\t");
+		foreach (Telerik.OpenAccess.CodeGeneration.CodeProperty @property in @class.Properties)
+		{
+			if(this.nameService.IsPrimitive(@property) && @property.HasSetter)
+			{
+				this.WriteLine(string.Format("entity.{0} = dto.{0};", @property.Name));
+			}
+		}
+		this.PopIndent();
+#>
+        this.OnEntityAssembled(entity);
+    }
+
+    public override <#= this.nameService.GetDTOName(@class.Name) #> Assemble(<#= @class.Name #> entity)
+    {
+        <#= @class.Name #>Dto dto = new <#= this.nameService.GetDTOName(@class.Name) #>();
+        
+<#+
+		this.PushIndent("\t\t");
+		this.WriteLine("ObjectKey key = KeyUtility.Instance.Create(entity);");
+		this.WriteLine(string.Format("dto.{0} = KeyUtility.Instance.Convert(key);", this.nameService.DtoKeyPropertyName));
+		foreach (Telerik.OpenAccess.CodeGeneration.CodeProperty property in @class.Properties)
+		{
+			if(this.nameService.IsPrimitive(property))
+			{
+				this.WriteLine(string.Format("dto.{0} = entity.{0};", @property.Name));
+			}
+		}
+		if(@class.BaseClass != null)
+        {
+			this.WriteLine("baseAssembler.AssembleBaseDto(entity, dto);");
+		}
+		this.PopIndent();
+#>
+		this.OnDTOAssembled(dto); 
+        return dto;
+    }
+
+	public override void AssembleBaseDto(<#= @class.Name #> entity, <#= this.nameService.GetDTOName(@class.Name) #> dto)
+    {
+<#+
+		this.PushIndent("\t\t");
+		foreach (Telerik.OpenAccess.CodeGeneration.CodeProperty property in @class.Properties)
+		{
+			if(this.nameService.IsPrimitive(property))
+			{
+				this.WriteLine(string.Format("dto.{0} = entity.{0};", @property.Name));
+			}
+		}
+		this.PopIndent();
+#>
+		this.OnDTOAssembled(dto); 
+    }
+
+    public override void AssembleReferences(<#= @class.Name #> entity, <#= this.nameService.GetDTOName(@class.Name) #> dto)
+    {
+<#+ 
+		var assemblersUsedForReferences = new System.Collections.Generic.HashSet<string>();
+        foreach (Telerik.OpenAccess.CodeGeneration.CodeProperty @property in @class.Properties)
+		{
+			var propertyDetail = this.GeneratePropertyDetail(@property);
+			if(this.nameService.IsReference(@property) && !this.nameService.IsCollection(@property))
+			{
+				this.PushIndent("\t\t");
+
+				string initializeCollection = string.Format("dto.{0} = new {1}();", propertyDetail.propertyName, propertyDetail.propertyType.Remove(0, 1));
+				
+				
+				string propertyType = @property.Type; //propertyDetail.propertyType.Substring(6, propertyDetail.propertyType.Length - 10);
+				string assemblerName = this.nameService.GetAssemblerName(propertyType);
+				string assemblerVariable = string.Concat(Char.ToLowerInvariant(assemblerName[0]), assemblerName.Remove(0, 1));
+
+				string initializeAssembler = string.Format("{0} {1} = new {0}();", assemblerName, assemblerVariable);
+				if(!assemblersUsedForReferences.Contains(assemblerVariable))
+				{
+					this.WriteLine(initializeAssembler);
+					assemblersUsedForReferences.Add(assemblerVariable);
+				}
+				
+				string populateReference = string.Format("dto.{0} = {1}.Assemble(entity.{2});", propertyDetail.propertyName, assemblerVariable, propertyDetail.propertyName);
+				this.WriteLine(populateReference);
+				this.WriteLine(string.Empty);
+				this.PopIndent();
+				
+			}
+		}
+#>
+    }
+
+    public override void AssembleCollections(<#= @class.Name #> entity, <#= this.nameService.GetDTOName(@class.Name) #> dto)
+    {
+<#+ 
+		var assemblersUsed = new System.Collections.Generic.HashSet<string>();
+        foreach (Telerik.OpenAccess.CodeGeneration.CodeProperty @property in @class.Properties)
+		{
+			var propertyDetail = this.GeneratePropertyDetail(@property);
+			if(this.nameService.IsCollection(@property))
+			{
+				this.PushIndent("\t\t");
+
+				string initializeCollection = string.Format("dto.{0} = new {1}();", propertyDetail.propertyName, propertyDetail.propertyType.Remove(0, 1));
+				
+				
+				string propertyType = @property.Type; //propertyDetail.propertyType.Substring(6, propertyDetail.propertyType.Length - 10);
+				string assemblerName = this.nameService.GetAssemblerName(propertyType);
+				string assemblerVariable = string.Concat(Char.ToLowerInvariant(assemblerName[0]), assemblerName.Remove(0, 1));
+
+				string initializeAssembler = string.Format("{0} {1} = new {0}();", assemblerName, assemblerVariable);
+				if(!assemblersUsed.Contains(assemblerVariable))
+				{
+					this.WriteLine(initializeAssembler);
+					assemblersUsed.Add(assemblerVariable);
+				}
+				this.WriteLine(string.Empty);
+
+				this.WriteLine(initializeCollection);
+#>
+foreach (<#= propertyType #> item in entity.<#= propertyDetail.propertyName #>)
+{
+	var dtoItem = <#= assemblerVariable #>.Assemble(item);
+<#+
+				string inverseField = this.associationEnds[@class.Name][@property.Name];
+				if(!string.IsNullOrEmpty(inverseField))
+				{
+					string inverseFieldAssign = string.Format("dtoItem.{0} = dto;", inverseField);
+					this.PushIndent("\t");
+					this.WriteLine(inverseFieldAssign);
+					this.PopIndent();
+				}
+#>
+	dto.<#= propertyDetail.propertyName #>.Add(dtoItem);
+}
+<#+				
+				this.WriteLine(string.Empty);
+				this.PopIndent();
+				
+			}
+		}
+#>
+    }
+
+}
+
+<#+
+	}
+	
+	private void GenerateDerivedAssembler(Telerik.OpenAccess.CodeGeneration.CodeClass @class)
+	{
+#>
+
+public partial class <#= this.nameService.GetAssemblerName(@class.Name) #> : <#= this.nameService.GetAssemblerBaseName(@class.Name) #>, <#= this.nameService.GetAssemblerInterfaceName(@class.Name) #>
+{
+    
+}
+<#+ 
+
+	}
+	
+	private void GenerateConverter()
+	{
+#>
+public class KeyUtility
+{
+    private static KeyUtility instance;
+    public static KeyUtility Instance
+    {
+        get
+        {
+            if (KeyUtility.instance == null)
+            {
+                KeyUtility.instance = new KeyUtility();
+            }
+            return KeyUtility.instance;
+        }
+        set
+        {
+            KeyUtility.instance = value;
+        }
+    }
+
+    public virtual string Convert(ObjectKey key)
+    {
+        TypeConverter converter = TypeDescriptor.GetConverter(typeof(ObjectKey));
+        return converter.ConvertTo(key, typeof(string)).ToString();
+    }
+
+    public virtual ObjectKey Convert<T>(string key)
+    {
+        try
+	    {
+	        if (Regex.IsMatch(key, @"\[.*?\](,\[.*?\])?|.?=.?"))
+	        {
+	            TypeConverter converter = TypeDescriptor.GetConverter(typeof(ObjectKey));
+	            ObjectKey objectKey = converter.ConvertFrom(key) as ObjectKey;
+	            objectKey.TypeName = typeof(T).FullName;
+	            return objectKey;
+	        }
+	        else
+	        {
+	            return new ObjectKey(typeof(T).FullName, key);
+	        }
+	    }
+	    catch (Exception ex)
+	    {
+	        throw new InvalidOperationException(string.Format("An object key cannot be resolved from string {0}", key), ex);
+	    }
+    }
+
+    public virtual ObjectKey Create(object entity)
+    {
+        return ObjectKey.Create(entity);
+        // If need to pass versioning information back and forth 
+        // you can use the following method to create an ObjectKey.
+        //return ObjectKey.CreateWithVersion(entity);
+    }
+}
+<#+
+	}
+#>

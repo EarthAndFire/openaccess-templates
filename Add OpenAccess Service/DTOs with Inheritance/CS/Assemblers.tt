@@ -1,0 +1,50 @@
+﻿<#@ template debug="true" hostSpecific="true" #>
+<#@ output extension=".cs" #>
+<#@ Assembly Name="System.Core.dll" #>
+<#@ Assembly Name="System.Xml.dll" #>
+<#@ Assembly Name="System.Xml.Linq.dll" #>
+<#@ Assembly Name="$OpenAccessAssembly$" #>
+<#@ Assembly Name="$TextTemplatingHostAssembly$" #>
+<#@ import namespace="System" #>
+<#@ import namespace="System.IO" #>
+<#@ import namespace="System.Diagnostics" #>
+<#@ import namespace="System.Linq" #>
+<#@ import namespace="System.Text" #>
+<#@ import namespace="System.Xml.Linq" #>
+<#@ import namespace="System.Collections" #>
+<#@ import namespace="System.Collections.Generic" #>
+<#@ import namespace="Telerik.OpenAccess.Metadata" #>
+<#@ include file="$SpecificIncludeFilePath$" #>
+<#@ include file="$GeneralIncludeFilePath$" #>
+<# 
+	this.InitializeTemplateGeneration();
+	this.GeneratePragmaBegin();
+#>
+namespace <#= this.nameService.AssemblersNamespace #>
+{
+<#
+	this.PushIndent("\t");
+	
+	this.GenerateNamespaces(this.namespaces);
+	
+	this.GenerateBaseAssembler();	
+	this.GenerateAssemblers();
+	
+	this.PopIndent();
+#>
+}
+<#
+	this.GeneratePragmaEnd();
+#>
+<#+ 
+	private void InitializeTemplateGeneration()
+	{
+		this.InitializeTemplateGenerationCore();
+		
+		this.namespaces.Add("Telerik.OpenAccess");
+		this.namespaces.Add(this.nameService.DtoNamespace);
+		this.namespaces.Add(this.nameService.ConverterNamespace);
+		
+		this.AddEntityUsings();
+	} 
+#>
