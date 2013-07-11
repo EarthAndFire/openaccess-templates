@@ -1,0 +1,41 @@
+﻿<#+ 
+public class NamespacesGenerator : Telerik.OpenAccess.CodeGeneration.TelerikTextTransformationBase
+{
+	protected string rootNamespace;
+
+	public NamespacesGenerator(TextTransformation rootGenerator, string rootNamespace)
+		:base(rootGenerator)
+    {
+		this.rootNamespace = rootNamespace;
+	}
+
+	/// <summary>
+	/// Generates a namespace signature.
+	/// </summary>
+	/// <param name="interface">The interface or class containing the namespace.</param>
+	/// <returns><c>true</c> if the interface/class have namespace.; otherwise, <c>false</c>.</returns>
+	public bool GenerateNamespaceStartBlock(Telerik.OpenAccess.CodeGeneration.CodeInterface @interface)
+	{
+		string @namespace = @interface.Namespace;
+
+		if (String.IsNullOrEmpty(@namespace) || @namespace == this.rootNamespace) 
+		{
+			return false;
+        }
+#>
+Namespace <#= @interface.Namespace #>	
+<#+  			 
+		return true;
+	}
+
+	/// <summary>
+	/// Generates a namespace end.
+	/// </summary>
+	public void GenerateNamespaceEndBlock()
+	{
+#>
+End Namespace
+<#+	
+	}
+}
+#>

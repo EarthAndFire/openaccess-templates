@@ -1,0 +1,219 @@
+﻿<#+
+public class ClassGenerator : Telerik.OpenAccess.CodeGeneration.TelerikTextTransformationBase
+{
+	protected AttributesGenerator attributesGenerator;
+	protected DocumentationGenerator documentationGenerator;
+	protected PropertiesGenerator propertiesGenerator;
+	protected bool isAttributesMapping;
+
+	public ClassGenerator(TextTransformation rootGenerator, AttributesGenerator attributesGenerator, 
+		DocumentationGenerator documentationGenerator, PropertiesGenerator propertiesGenerator, Telerik.OpenAccess.Metadata.MappingDefinitionType mappingType)
+		:base(rootGenerator)
+    {
+		this.attributesGenerator = attributesGenerator;
+		this.documentationGenerator = documentationGenerator;
+		this.propertiesGenerator = propertiesGenerator;
+		this.isAttributesMapping = mappingType == Telerik.OpenAccess.Metadata.MappingDefinitionType.Attributes;
+	}
+
+	/// <summary>
+	/// Generates a class.
+	/// </summary>
+	/// <param name="@class">The class model.</param>
+	public void GenerateClass(Telerik.OpenAccess.CodeGeneration.CodeClass @class)
+	{
+		this.documentationGenerator.GenerateComments(@class.Comments);	
+		this.documentationGenerator.GenerateSummary(@class.Summary);
+		this.attributesGenerator.GenerateAttributes(@class.Attributes);
+		this.GenerateClassSignature(@class);
+		this.PushIndent("\t");
+		this.propertiesGenerator.GenerateProperties(@class);
+		if (@class.ImplementIDataErrorInfo)
+        {
+			if(@class.BaseClass == null)
+            {
+				this.GenerateIDataErrorInfoMembers();
+            }
+			else
+            {
+				this.GenerateIDataErrorInfoInDerivedClass();
+			}
+        }
+
+        if (@class.ImplementINotifyPropertyChanging && @class.BaseClass == null)
+        {
+			this.GenerateINotifyPropertyChangingMembers();
+        }
+
+        if (@class.ImplementINotifyPropertyChanged && @class.BaseClass == null)
+        {
+			this.GenerateINotifyPropertyChangedMembers();
+        }
+
+		this.GenerateOnSerializationMethod();
+
+		this.PopIndent();
+#>
+End Class
+<#+ 
+	}
+
+	protected void GenerateClassSignature(Telerik.OpenAccess.CodeGeneration.CodeClass codeClass)
+	{
+		var implements = codeClass.Implements.Select(i => i.Name);
+		var interfacesString = string.Join(", ", implements);
+#>
+<#= codeClass.TypeAccessModifier.ToCode() #><#= codeClass.TypeInheritanceModifier.ToCode() #> Partial Class <#= codeClass.Name #>
+<#+
+		if (codeClass.BaseClass != null)
+		{
+#>
+	Inherits <#= codeClass.BaseClass.Name #>
+<#+
+        }
+
+		if (string.IsNullOrWhiteSpace(interfacesString) == false)
+        {
+#>
+	Implements <#= interfacesString #>
+<#+
+		}
+    }
+
+	protected void GenerateIDataErrorInfoMembers()
+    {
+#>
+#Region "IDataErrorInfo members"
+
+<#+
+		if(this.isAttributesMapping)
+        {
+			this.attributesGenerator.GenerateTransientAttribute();
+		}
+#>
+Private _error As String = String.Empty
+<#+
+		if(this.isAttributesMapping)
+        {
+			this.attributesGenerator.GenerateTransientAttribute();
+		}
+#>
+Public ReadOnly Property [Error]() As String Implements IDataErrorInfo.Error
+	Get
+		Return Me._error
+	End Get
+End Property
+
+<#+
+		if(this.isAttributesMapping)
+        {
+			this.attributesGenerator.GenerateTransientAttribute();
+		}
+#>
+Public ReadOnly Property Item(ByVal propertyName As String) As String Implements IDataErrorInfo.Item
+	Get
+		Me.ValidatePropertyInternal(propertyName, Me._error)
+
+		Return Me._error
+	End Get
+End Property
+
+Protected Overridable Sub ValidatePropertyInternal(propertyName As String, ByRef [error] As String)
+	Me.ValidateProperty(propertyName, [error])
+End Sub
+
+' Please implement this method in a partial class in order to provide the error message depending on each of the properties.
+Partial Private Sub ValidateProperty(ByVal propertyName As String, ByRef _error As String)
+End Sub
+
+#End Region
+
+<#+
+    }
+
+	protected void GenerateIDataErrorInfoInDerivedClass()
+    {
+#>
+#Region "IDataErrorInfo members"
+
+Protected Overrides Sub ValidatePropertyInternal(propertyName As String, ByRef [error] As String)
+	Me.ValidateProperty(propertyName, [error])
+End Sub
+
+' Please implement this method in a partial class in order to provide the error message depending on each of the properties.
+Partial Private Sub ValidateProperty(ByVal propertyName As String, ByRef _error As String)
+End Sub
+
+#End Region
+
+<#+
+    }
+
+	protected void GenerateINotifyPropertyChangingMembers()
+	{
+#>
+#Region "INotifyPropertyChanging members"
+
+Public Event PropertyChanging As PropertyChangingEventHandler Implements INotifyPropertyChanging.PropertyChanging
+
+Protected Overridable Sub OnPropertyChanging(ByVal propertyName As String)
+	RaiseEvent PropertyChanging(Me, New PropertyChangingEventArgs(propertyName))
+End Sub
+
+#End Region
+
+<#+
+    }
+
+	protected void GenerateINotifyPropertyChangedMembers()
+    {
+#>
+#Region "INotifyPropertyChanged members"
+
+Public Event PropertyChanged As PropertyChangedEventHandler Implements INotifyPropertyChanged.PropertyChanged
+
+Protected Overridable Sub OnPropertyChanged(ByVal propertyName As String)
+	RaiseEvent PropertyChanged(Me, New PropertyChangedEventArgs(propertyName))
+End Sub
+
+#End Region
+
+<#+
+	}
+
+	protected void GenerateOnSerializationMethod()
+    {
+#>
+<OnSerializing()>
+Friend Sub OnSerializingMethod(ByVal context As StreamingContext)
+<#+
+		this.PopIndent();
+		this.PopIndent();
+#>
+#If DEBUG Then
+<#+
+		this.PushIndent("\t");
+		this.PushIndent("\t");
+#>
+	' The entity that will be serialized must be detached from the context
+	' If the entity is not detached, all of its references and collections will be serialized too
+	' in this case at the end the entire database will be serialized
+	If Telerik.OpenAccess.OpenAccessContext.PersistenceState.IsDetached(Me) <> True Then
+		System.Diagnostics.Debug.Fail("Do not serialize entities that are still attached!")
+	End If
+<#+
+	this.PopIndent();
+	this.PopIndent();
+#>
+#End If
+<#+
+		this.PushIndent("\t");
+		this.PushIndent("\t");
+#>
+		CType(Me, PersistenceCapable).OpenAccessEnhancedPreSerialize()
+End Sub
+<#+
+	}
+
+}
+#>

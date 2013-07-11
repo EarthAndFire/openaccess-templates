@@ -1,0 +1,641 @@
+﻿<#+
+public class DomainMethodsGenerator : TelerikTextTransformationBase
+{
+	protected Telerik.OpenAccess.CodeGeneration.ContextClass contextClass;
+	protected bool generateClassicAPIMethods = false;
+	protected Telerik.OpenAccess.Metadata.Backend currentBackend;
+	protected AttributesGenerator attributesGenerator;
+
+	public DomainMethodsGenerator(TextTransformation rootGenerator, 
+		AttributesGenerator attributesGenerator, 
+		Telerik.OpenAccess.Metadata.Backend backend)
+		:base(rootGenerator)
+    {
+		this.currentBackend = backend;
+		this.attributesGenerator = attributesGenerator;
+	}
+
+	/// <summary>
+	/// Generates domain methods that execute stored procedures on the database server.
+	/// </summary>
+	/// <param name="functions">The context class containing the list of methods.</param>
+	public void GenerateDomainMethods(Telerik.OpenAccess.CodeGeneration.ContextClass contextClass)
+    {
+		this.contextClass = contextClass;
+		this.GenerateInstanceMethods(contextClass.Functions);
+
+		if (this.generateClassicAPIMethods && contextClass.OldApiFunctions != null)
+		{
+			this.GenerateClassicAPIInstanceMethods(contextClass.OldApiFunctions);
+		}
+    }
+
+	protected void GenerateInstanceMethods(System.Collections.Generic.IEnumerable<Telerik.OpenAccess.CodeGeneration.CodeDomainMethod> functions)
+	{
+		GenerateReaderCalls(functions);
+	
+		foreach(var function in functions)
+		{
+			GenerateFunction(function);
+		}
+	}
+
+	protected void GenerateReaderCalls(System.Collections.Generic.IEnumerable<Telerik.OpenAccess.CodeGeneration.CodeDomainMethod> functions)
+	{
+		IList<string> storedProcedureToMethod = new List<string>();
+		foreach(Telerik.OpenAccess.CodeGeneration.CodeDomainMethod function in functions)
+		{
+			if((string.IsNullOrEmpty(function.SqlObjectName) || storedProcedureToMethod.Contains(function.SqlObjectName)) || function.HasMultipleResultSet == false)
+			{
+				continue;
+			}
+
+			GenerateReaderCall(function);
+
+			storedProcedureToMethod.Add(function.SqlObjectName);
+		}
+	}
+
+	protected void GenerateReaderCall(Telerik.OpenAccess.CodeGeneration.CodeDomainMethod function)
+	{
+		string sqlName = function.SqlObjectName;	
+		string correctedSqlName = function.ValidSqlObjectName;
+		string functionName = string.Concat("GetReaderFor", correctedSqlName);
+		string clrParametersDeclaration = GetClrParametersDeclarationForFunction(function, false);
+
+		bool hasOutputParams = HasOutputParameters(function);
+		if(hasOutputParams)
+		{
+			clrParametersDeclaration = AppendClrParameters(clrParametersDeclaration, "ByRef inOutParameters() As OAParameter ");
+		}
+
+		if(function.GenerateReturnValueOverload)
+		{
+			clrParametersDeclaration = AppendClrParameters(clrParametersDeclaration, string.Format("ByRef {0} As OAParameter", function.ReturnParameter.VariableName));
+		}
+#>
+Public Function <#= functionName #>(<#= clrParametersDeclaration #>) As OADataReader	
+	Using command As OACommand = Me.Connection.CreateCommand()		
+		command.CommandText = "<#= sqlName #>"
+		command.CommandType = CommandType.StoredProcedure
+			
+<#+ 
+			if(function.GenerateReturnValueOverload)
+            {
+				string returnValueVarName = function.ReturnParameter.VariableName;
+#>
+		<#= returnValueVarName #> = New OAParameter()
+		<#= returnValueVarName #>.Direction = ParameterDirection.ReturnValue
+		<#= returnValueVarName #>.ParameterName = "<#= returnValueVarName #>"
+		command.Parameters.Add(<#= returnValueVarName #>)
+						
+<#+
+			}		
+
+			List<string> outputVariables = new List<string>();
+			this.PushIndent("\t\t");
+			
+			for (int i = 0; i < function.Parameters.Count; i++)
+			{
+				var variableName = GenerateSqlParameterDeclaration(function.DomainMethodParameters[i], true, true);
+				if(variableName != null)
+					outputVariables.Add(variableName);
+			}
+
+			this.PopIndent();		
+			if(hasOutputParams && outputVariables.Count > 0)
+            {
+				string allVariables = string.Join(", ", outputVariables);
+#>	
+		inOutParameters = New OAParameter() {<#= allVariables #>}
+<#+
+			}
+#>
+
+		Return command.ExecuteReader()
+	End Using
+End Function
+
+<#+
+	this.WriteLine(string.Empty);
+}
+
+	protected void GenerateFunction(Telerik.OpenAccess.CodeGeneration.CodeDomainMethod function)
+	{
+		if(function.HasMultipleResultSet)
+		{
+			this.GenerateFunctionCallToReader(function);
+			this.WriteLine(string.Empty);
+		}
+		else
+		{
+			this.GenerateFunctionCallToAdo(function);
+		}
+	}
+
+	protected void GenerateClassicAPIInstanceMethods(System.Collections.Generic.IEnumerable<Telerik.OpenAccess.CodeGeneration.CodeDomainMethod> functions)
+	{
+		foreach(var function in functions)
+		{
+			this.GenerateClassicAPIFunction(function);
+		}
+	}
+
+	protected void GenerateClassicAPIFunction(Telerik.OpenAccess.CodeGeneration.CodeDomainMethod function)
+	{
+		string clrParametersDeclaration = GetClrParametersDeclarationForFunction(function, true);
+		string sqlParameterVariablesNames = function.DomainMethodParameters.ToSqlParameterVariablesNames();
+		string questionMarks = function.DomainMethodParameters.ToQuestionMarkToken();
+		string executionParameters = function.DomainMethodParameters.ToExecutionString();
+		string sqlParameterDefinition = string.Empty;
+		if(string.IsNullOrEmpty(executionParameters))
+		{
+			sqlParameterDefinition = "Nothing";
+		}
+		else
+		{
+			sqlParameterDefinition ="sqlParameters,";
+		}
+
+		this.attributesGenerator.GenerateAttributes(function.Attributes);
+
+#>
+Public Function <#= function.Name #>(<#= clrParametersDeclaration #>) As Object()
+<#+ 
+		string dictionaryName= string.Empty;
+		int count = function.DomainMethodParameters.Length;
+		if(count > 0)
+		{
+			this.PushIndent("\t");
+			for (int i = 0; i < count; i++)
+    		{
+        		 GenerateSqlParameterDeclaration(function.DomainMethodParameters[i]);
+    		}
+			this.PopIndent();
+			bool hasOutput = this.HasOutputParameters(function);
+        
+			if(hasOutput)
+			{
+			dictionaryName = "outParameterMap, ";
+#>
+	Dim outParameterMap As IDictionary(Of String, Object) = New Dictionary(Of String, Object)
+<#+
+			}
+#>
+	
+	Dim sqlParameters As List(Of SqlParameter) = New List(Of SqlParameter) _
+		(New SqlParameter() { <#= sqlParameterVariablesNames #> })
+	
+<#+
+		}
+#>
+	Dim queryResult As Object() = Me.ExecuteStoredProcedure(Of Object)("<#= function.ValidSqlObjectName #> <#= questionMarks #>", <#= sqlParameterDefinition #><#= dictionaryName #> <#= executionParameters #>)
+<#+
+		this.PushIndent("\t");
+        string parameterAssigning = this.GenerateParameterAssigning(function);
+        this.WriteLine(parameterAssigning);
+        this.PopIndent();
+#>
+	Return queryResult
+End Function
+
+<#+ 
+	}
+
+	protected void GeneratePrimitiveFunction(Telerik.OpenAccess.CodeGeneration.CodeDomainMethod function, string sqlName, string returnType, string clrParametersDeclaration)
+	{
+		this.attributesGenerator.GenerateAttributes(function.Attributes);
+
+#>
+<MappedFunctionAttribute(Name := "<#= sqlName #>", IsDeterministic := <#= function.IsDeterministic.ToCode() #>, Backend:=<#= currentBackend.ToCode(true) #>)> _
+Public Shared Function <#= function.Name #>(<#= clrParametersDeclaration #>) As <#= returnType #>
+	Throw New NotImplementedException()
+End Function
+
+<#+ 
+		this.WriteLine(string.Empty);
+	}
+
+	protected void GenerateFunctionCallToAdo(Telerik.OpenAccess.CodeGeneration.CodeDomainMethod function)
+	{
+		string clrParametersDeclaration = GetClrParametersDeclarationForFunction(function, true);
+		string executionParameters = function.DomainMethodParameters.ToSqlParameterVariablesNames();	
+   
+		string sqlName = function.SqlObjectName;
+
+
+		if (function.IsFunction == true && function.FunctionType == Telerik.Data.Dsl.DomainFunctionType.PrimitiveType)
+		{
+			 this.GeneratePrimitiveFunction(function, sqlName, function.ResultType, clrParametersDeclaration);
+
+			 return;
+		}
+
+		if(function.FunctionType == Telerik.Data.Dsl.DomainFunctionType.PersistentType || 
+	    function.FunctionType == Telerik.Data.Dsl.DomainFunctionType.CustomShape)
+		{
+			function.ResultType = string.Concat("Global.", function.ResultType);
+		}
+
+		string methodToBeExecuted= string.Concat("Me.ExecuteQuery(Of ",function.ResultType,")"); 
+		if(function.FunctionType == Telerik.Data.Dsl.DomainFunctionType.Void)
+		{
+			methodToBeExecuted = "Me.ExecuteNonQuery";
+		}
+		else if(function.FunctionType == Telerik.Data.Dsl.DomainFunctionType.PrimitiveType)
+		{
+			methodToBeExecuted = string.Concat("Me.ExecuteScalar(Of ", function.ResultType,")");
+		}
+
+		this.PushIndent("\t");
+		this.attributesGenerator.GenerateAttributes(function.Attributes);
+		this.PopIndent();
+		string returnValueParamDeclaration = string.Empty;
+		if(function.GenerateReturnValueOverload)
+		{
+			returnValueParamDeclaration = string.Format("Dim {0} As OAParameter", function.ReturnParameter.VariableName);
+			executionParameters = AppendClrParameters(executionParameters, function.ReturnParameter.VariableName);
+			GenerateFunctionOverload(function, function.ReturnType, ref clrParametersDeclaration);
+		}
+
+		if(!string.IsNullOrEmpty(executionParameters))
+		{
+			executionParameters = string.Concat(", ",executionParameters);
+		}
+
+
+		this.attributesGenerator.GenerateAttributes(function.Attributes);
+
+#>
+Public Function <#= function.Name #>(<#= clrParametersDeclaration #>) As <#= function.ReturnType #> Implements <#= this.contextClass.IUnitOfWorkInterface.Name #>.<#= function.Name #>
+<#+ 
+		if(function.GenerateReturnValueOverload)
+		{
+			string returnValueVarName = function.ReturnParameter.VariableName;
+
+#>
+	Dim <#=returnValueVarName#> As New OAParameter()
+	<#=returnValueVarName#>.Direction = ParameterDirection.ReturnValue
+	<#=returnValueVarName#>.ParameterName = "<#=returnValueVarName#>"
+
+<#+
+		}
+		int count = function.DomainMethodParameters.Length; 
+		if(count > 0)
+		{
+			this.PushIndent("\t");
+			for (int i = 0; i < count; i++)
+    		{
+        		GenerateSqlParameterDeclaration(function.DomainMethodParameters[i], false, true);
+				this.WriteLine(string.Empty);
+    		}
+			this.PopIndent();        
+		 }
+
+		 if(function.IsFunction)
+		 {
+			string sqlParameters = function.DomainMethodParameters.ToExecutionString(true);
+			string sql = string.Empty;
+			if(currentBackend == Telerik.OpenAccess.Metadata.Backend.Oracle)
+				sql = string.Format("SELECT {0}({1}) FROM dual", sqlName, sqlParameters);
+			else
+				sql = string.Format("SELECT * FROM {0}({1})", sqlName, sqlParameters);
+	
+#>
+	Dim queryResult As <#= function.ReturnType #>= <#= methodToBeExecuted #>("<#= sql #>", CommandType.Text<#= executionParameters #>)
+<#+
+		 }
+		 else
+		 {
+#>
+	Dim queryResult As <#= function.ReturnType #>= <#= methodToBeExecuted #>("<#= sqlName #>", CommandType.StoredProcedure<#= executionParameters #>)
+
+<#+		
+		 }
+
+		if(function.GenerateReturnValueOverload)
+		{
+#>
+	If <#= function.ReturnParameter.VariableName #>.Value Is DBNull.Value Then
+		<#= function.ReturnParameter.Name #> = -1
+	Else
+		<#= function.ReturnParameter.Name #> = DirectCast(<#= function.ReturnParameter.VariableName #>.Value, Integer)
+	End If
+<#+
+		}
+
+		this.PushIndent("\t");
+		this.GenerateParameterAssigningForAdoApi(function);
+		this.PopIndent();
+#>
+
+	Return queryResult
+End Function
+
+<#+
+}
+
+	protected void GenerateFunctionOverload(Telerik.OpenAccess.CodeGeneration.CodeDomainMethod function, string resultType, ref string clrParametersDeclaration)
+	{
+		string clrParametersDeclarationOverload = clrParametersDeclaration;
+		clrParametersDeclaration = AppendClrParameters(clrParametersDeclaration, function.ReturnParameter.ToClrDeclarationString());
+	
+		string clrExecutionParametersOverload = function.DomainMethodParameters.ToExecutionString(false, true);
+		clrExecutionParametersOverload = AppendClrParameters(clrExecutionParametersOverload, function.ReturnParameter.Name);
+
+		this.attributesGenerator.GenerateAttributes(function.Attributes);
+
+#>
+Public Function <#= function.Name #>(<#= clrParametersDeclarationOverload #>) As <#= resultType #> Implements <#= this.contextClass.IUnitOfWorkInterface.Name #>.<#= function.Name #>
+	Dim returnValue As Integer
+	Return <#= function.Name #>(<#= clrExecutionParametersOverload #>)
+End Function
+
+<#+
+	}
+
+	protected void GenerateFunctionCallToReader(Telerik.OpenAccess.CodeGeneration.CodeDomainMethod function)
+	{
+		string sqlName = function.SqlObjectName;
+		string executionParameters = function.DomainMethodParameters.ToExecutionString();
+		string functionName = string.Concat("GetReaderFor", function.ValidSqlObjectName);
+		string clrParametersDeclaration = GetClrParametersDeclarationForFunction(function, true);	
+
+  		string outParamArrayDeclaration = string.Empty;
+		bool hasOutputParams = HasOutputParameters(function);
+		if(hasOutputParams)
+		{
+			outParamArrayDeclaration = "Dim inOutParameters() As OAParameter";
+			executionParameters = AppendClrParameters(executionParameters, "inOutParameters"); 
+		}
+
+		string returnValueParamDeclaration = string.Empty;
+		if(function.GenerateReturnValueOverload)
+		{
+			returnValueParamDeclaration = string.Format("Dim {0} As OAParameter", function.ReturnParameter.VariableName);
+			executionParameters = AppendClrParameters(executionParameters, function.ReturnParameter.VariableName);
+			GenerateFunctionOverload(function, function.ReturnType, ref clrParametersDeclaration);
+		}
+
+#>
+Public Function <#= function.Name #>(<#= clrParametersDeclaration #>) As <#= function.ReturnType #> Implements <#= this.contextClass.IUnitOfWorkInterface.Name #>.<#= function.Name #> 	 
+		
+	Dim result As <#= function.ReturnType #>
+	<#= outParamArrayDeclaration #>
+	<#= returnValueParamDeclaration #>
+		
+	Using reader As OADataReader = Me.<#= functionName #>(<#= executionParameters #>)
+<#+
+		if(function.ResultSetSequence.HasValue)
+		{
+			int seqValue = function.ResultSetSequence.Value;
+			if(seqValue == 1)
+			{
+#>
+		reader.NextResult()
+<#+
+			}
+			else if(seqValue > 1)
+			{
+#>
+		For i As Integer = 0 To <#= seqValue #>
+			reader.NextResult()
+        Next
+<#+
+			}
+		}
+		if(function.FunctionType == Telerik.Data.Dsl.DomainFunctionType.PrimitiveType)
+		{
+#>
+		reader.Read()
+		result = CType(reader.GetValue(0),<#= function.ResultType #>)
+<#+
+		}
+		else if(function.FunctionType == Telerik.Data.Dsl.DomainFunctionType.Void)
+		{
+#>
+		reader.Read()
+		result = 0
+<#+
+		}
+		else
+		{
+#>
+		result = Me.Translate(Of Global.<#= function.ResultType #>)(reader).ToList()
+<#+
+		}
+
+#>
+	End Using
+
+<#+
+		if(hasOutputParams)
+        {
+			this.PushIndent("\t");
+			GenerateParameterAssigningForAdoApi(function, true);
+			this.PopIndent();
+        }
+
+		if(function.GenerateReturnValueOverload)
+        {
+#>
+
+	If <#=function.ReturnParameter.VariableName#>.Value Is DBNull.Value Then
+		<#= function.ReturnParameter.Name #> = -1
+	Else
+		<#= function.ReturnParameter.Name #> = DirectCast(<#=function.ReturnParameter.VariableName#>.Value, Integer)
+	End If
+<#+
+		}
+
+#>
+
+	Return result
+End Function
+<#+ 
+} 
+
+	protected bool HasOutputParameters(Telerik.OpenAccess.CodeGeneration.CodeDomainMethod function)
+	{
+		int count = function.DomainMethodParameters.Length;
+		for (int i = 0; i < count; i++)
+		{
+			if(function.DomainMethodParameters[i].IsCursor)
+			{
+				continue;
+			}
+
+			if(function.DomainMethodParameters[i].IsOutParameter)
+			{
+				return true;
+			}
+		}
+		return false;
+	}
+
+
+	protected string GenerateParameterAssigning(Telerik.OpenAccess.CodeGeneration.CodeDomainMethod function)
+	{
+		StringBuilder parameterAssigning = new StringBuilder();
+		for (int i = 0; i < function.DomainMethodParameters.Length; i++)
+		{
+			Telerik.OpenAccess.CodeGeneration.CodeDomainMethodParameter parameter = function.DomainMethodParameters[i];
+			if(parameter.IsOutParameter)
+			{
+				string sqlParameterName= string.Concat("outParameterMap(\"", parameter.SqlObjectName, "\")");
+				string type = string.Concat(" = DirectCast(", parameter.ToTypeString(), ") ");
+				string tempOutput = string.Concat(parameter.Name, type, sqlParameterName);
+				parameterAssigning.AppendLine(tempOutput);
+			}
+		}
+
+		return parameterAssigning.ToString();
+	}
+
+	protected void GenerateParameterAssigningForAdoApi(Telerik.OpenAccess.CodeGeneration.CodeDomainMethod function, bool fromOutputParamArray = false)
+	{
+		int arrayIndex = 0;
+		for (int i = 0; i < function.DomainMethodParameters.Length; i++)
+		{
+			Telerik.OpenAccess.CodeGeneration.CodeDomainMethodParameter parameter = function.DomainMethodParameters[i];
+			if(parameter.IsCursor)
+			{
+				continue;
+			}
+		
+			if(parameter.IsOutParameter)
+			{
+				string adoParameterName= parameter.VariableName;
+				string typeStringPresentation = parameter.ToTypeString();
+
+				if(fromOutputParamArray)
+				{
+					adoParameterName = string.Format("inOutParameters({0})", arrayIndex);
+					arrayIndex++;
+				}
+
+#>
+If <#= adoParameterName #>.Value Is DBNull.Value Then
+	<#= parameter.Name #> = CType(Nothing, <#= typeStringPresentation #>)
+Else
+	<#= parameter.Name #> = DirectCast(<#= adoParameterName #>.Value, <#= typeStringPresentation #>)
+End If
+<#+
+			}
+		}
+	}
+
+	protected void GenerateSqlParameterDeclaration(Telerik.OpenAccess.CodeGeneration.CodeDomainMethodParameter parameter)
+	{
+			 string name = parameter.SqlObjectName;
+			 string type = parameter.OpenAccessType.ToCode();
+			 string mode = string.Empty;
+			 if (parameter.Mode != Telerik.OpenAccess.ParameterMode.In)
+    		 {
+       	 		 mode = string.Concat(", ", parameter.Mode.ToCode());
+    		 }
+#>
+Dim <#= parameter.VariableName #> As New SqlParameter("<#= name #>", <#= string.Concat(type, mode) #>)
+
+<#+ 
+	}
+
+	protected string GenerateSqlParameterDeclaration(Telerik.OpenAccess.CodeGeneration.CodeDomainMethodParameter parameter, bool shouldAddToCommand, bool outDirection)
+	{
+		string name = parameter.SqlObjectName;
+		string mode = string.Empty;
+		string variableName = parameter.VariableName;
+		bool isOutParameter = parameter.IsOutParameter;
+	
+		if(parameter.IsCursor)
+		{
+			isOutParameter = true;
+			outDirection = true;
+#>
+' Oracle.DataAccess assembly reference is required
+Dim <#= variableName #> As New Oracle.DataAccess.Client.OracleParameter
+<#= variableName #>.ParameterName = "<#= name #>"
+<#= variableName #>.OracleDbType = Oracle.DataAccess.Client.OracleDbType.RefCursor
+<#= variableName #>.Direction = ParameterDirection.Output
+<#+
+		}
+		else
+		{
+#>
+Dim <#= variableName #> As New Telerik.OpenAccess.Data.Common.OAParameter
+<#= variableName #>.ParameterName = "<#= name #>"
+<#+
+		if(outDirection && isOutParameter)
+		{
+#>
+<#= variableName #>.Direction = <#= parameter.DataDirection.ToCode() #>
+<#+
+}			
+			this.AssignParameterValue(parameter, variableName);
+		}
+		
+        if(shouldAddToCommand)
+		{
+#>
+command.Parameters.Add(<#= variableName #>)        
+<#+ 
+		}
+
+		if(outDirection && (isOutParameter && parameter.IsCursor == false))
+		{
+			return variableName;
+		}
+		else
+		{
+			return null;
+		}
+	}
+
+	private void AssignParameterValue(Telerik.OpenAccess.CodeGeneration.CodeDomainMethodParameter parameter, string variableName)
+	{
+		bool isNullable = parameter.IsNullable;
+
+		if(parameter.DbType == DbType.String || isNullable)
+		{
+			if(isNullable)
+			{
+#>
+If <#= parameter.Name #>.HasValue Then
+	<#= variableName #>.Value = <#= parameter.Name #>.Value
+<#+
+			}
+			else 
+			{
+#>
+<#= variableName #>.Size = <#= parameter.Length.Value #>
+If <#= parameter.Name #> IsNot Nothing Then
+	<#= variableName #>.Value = <#= parameter.Name #>	
+<#+
+			}
+#>
+Else
+	<#= variableName #>.DbType = <#= parameter.DbType.ToCode() #>	
+	<#= variableName #>.Value = DBNull.Value
+End If
+<#+		
+			}
+		else
+		{
+#>
+<#=variableName#>.Value = <#=parameter.Name#>
+<#+
+		}
+	}
+	
+	protected string GetClrParametersDeclarationForFunction(Telerik.OpenAccess.CodeGeneration.CodeDomainMethod function, bool generateRef)
+	{    
+		return function.DomainMethodParameters.Where(p => p.IsCursor == false).ToClrDeclarationString(generateRef);
+	}
+
+	protected string AppendClrParameters(string declaration1, string declaration2)
+	{
+		var result = declaration1 + (string.IsNullOrEmpty(declaration1)? string.Empty: ", ") + declaration2;
+		return result;
+	}
+}
+#>
