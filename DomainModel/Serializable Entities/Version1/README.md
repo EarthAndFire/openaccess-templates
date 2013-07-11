@@ -48,8 +48,8 @@ The **Serializable Entities** templates package provides a code generation with 
 ### Prerequisites ###
 
 - Telerik OpenAccess ORM Q2 2013 SP1 or higher installed.
-- Visual Studio 2012.
-- .NET Framework 4.5.
+- Visual Studio 2010.
+- .NET Framework 3.5.
 
 ### Resources ###
 - <a href="http://www.telerik.com/products/orm/getting-started.aspx" target="_blank">Telerik OpenAccess ORM - Getting Started</a>
