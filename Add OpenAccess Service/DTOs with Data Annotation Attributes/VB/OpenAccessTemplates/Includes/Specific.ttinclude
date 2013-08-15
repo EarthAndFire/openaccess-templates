@@ -109,11 +109,33 @@ End Class
 	/// <param name="properties">The list of properties.</param>
 	private void GenerateProperties(System.Collections.Generic.IEnumerable<Telerik.OpenAccess.CodeGeneration.CodeProperty> properties)
 	{
+
 		PushIndent("\t");
+		Telerik.OpenAccess.CodeGeneration.TextTemplatingHost host = 
+			this.Host as Telerik.OpenAccess.CodeGeneration.TextTemplatingHost;
 		//ProcessPropertiesIfAutoImplementedSettingIsOn(properties);
 		properties.ForEach(
 			property => 
 			{
+				string clsName = property.UserData["ClassName"].ToString();
+				var metadataContainer = host.Arguments["SelectedContextMetadata"].Value as Telerik.OpenAccess.Metadata.MetadataContainer;
+				var persistentType = metadataContainer.PersistentTypes.FirstOrDefault(pt => string.Equals(pt.Name, clsName));
+				Telerik.OpenAccess.Metadata.MetaPrimitiveMember metaPrimitiveProperty = null;
+				if(persistentType != null)
+				{
+					metaPrimitiveProperty = persistentType.GetMembers(true).FirstOrDefault(m => m.PropertyName == property.Name) as Telerik.OpenAccess.Metadata.MetaPrimitiveMember;
+				}
+				
+				if(metaPrimitiveProperty != null)
+				{
+					var translator = new Telerik.OpenAccess.CodeGeneration.AttributesTranslator();
+					translator.SetDataAnnotationAttributes(metaPrimitiveProperty, property);
+					foreach(var attribute in property.Attributes)
+					{
+						this.WriteLine(Telerik.OpenAccess.CodeGeneration.VisualBasic.VisualBasicExtensions.ToCode(attribute));
+					}
+				}
+				
 				GenerateProperty(property);
 			});
 
