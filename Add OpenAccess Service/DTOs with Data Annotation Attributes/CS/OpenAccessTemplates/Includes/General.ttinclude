@@ -249,6 +249,8 @@
                     }
                 }
             }
+			
+			namespacesToAdd.Add("System.ComponentModel.DataAnnotations");
             this.namespaces.AddRange(System.Linq.Enumerable.Distinct<string>(namespacesToAdd));
         }
     }
