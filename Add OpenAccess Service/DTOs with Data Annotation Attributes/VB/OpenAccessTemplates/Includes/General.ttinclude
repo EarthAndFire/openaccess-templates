@@ -1,0 +1,705 @@
+﻿<#+ 
+    string  rootNamespace = null;
+    private MetaModelCodeGenUtilities utilities = null;
+    private CodeDom codegenModel = null;
+    private DtoGenerationSessionState nameService = new DtoGenerationSessionState();
+    private ContextClassInfo contextClassInfo = new ContextClassInfo();
+    private List<string> namespaces = new List<string>();
+    private static Dictionary<string, string> typeDefaultPresentation = GeneratedTextTransformation.InitializeLanguageDependentTypeMap();
+    private Dictionary<string, Dictionary<string, string>> associationEnds = new Dictionary<string, Dictionary<string, string>>();
+    
+    private void InitializeTemplateGenerationCore()
+    {
+        Telerik.OpenAccess.CodeGeneration.TextTemplatingHost host = 
+            this.Host as Telerik.OpenAccess.CodeGeneration.TextTemplatingHost;
+                
+        string projectNamespace = host.Arguments["CodeBehindProjectNamespace"].Value as string;
+        var metaModel = host.Arguments["SelectedContextMetadata"].Value as Telerik.OpenAccess.Metadata.MetadataContainer;		
+        if(metaModel != null)
+        {
+            this.rootNamespace = metaModel.RootNamespace;
+        }
+        this.contextClassInfo = host.Arguments["SelectedContextInfo"].Value as ContextClassInfo;
+        
+        this.utilities = new MetaModelCodeGenUtilities(LanguageContext.CreateVbContext());
+        this.codegenModel = utilities.GetCodeGenModel(metaModel);
+        this.nameService.Initialize(this.codegenModel, projectNamespace, contextClassInfo.Name);
+        this.PopulateAssociationEnds(metaModel);
+
+        InitializeLanguageDependentTypeMap();
+    }	
+    
+    private string InitializeConstructorParams(Telerik.OpenAccess.CodeGeneration.CodeClass @class)
+    {
+        bool first = true;
+        StringBuilder builder = new StringBuilder();
+        
+            @class.Properties.ForEach(
+        property => 
+        {
+            PropertyDetail details = this.GeneratePropertyDetail(property);
+            
+            if (first)
+            {
+                first = false;	 
+            }
+            else
+            {
+                builder.Append(", ");
+            }
+            builder.AppendFormat("ByVal {0} As {1}", details.fieldName, details.propertyType);
+        });
+        
+        return builder.ToString();
+    }
+
+    private void PopulateAssociationEnds(Telerik.OpenAccess.Metadata.MetadataContainer container)
+    {
+        foreach (var type in container.PersistentTypes)
+        {
+            associationEnds[type.Name] = new Dictionary<string, string>();
+            foreach (var member in Telerik.OpenAccess.Metadata.MetadataWorker.GetNavigationMembers(type))
+            {
+                associationEnds[type.Name][member.PropertyName] = this.GetOppositeMemberName(member);
+            }
+        }
+    }
+
+    private string GetOppositeMemberName(Telerik.OpenAccess.Metadata.MetaNavigationMember navigationMember)
+    {
+        var association = navigationMember.Association;
+
+        if (association == null || association is Telerik.OpenAccess.Metadata.MetaJoinTableAssociation)
+        {
+           return null;
+        }
+        else if (navigationMember == association.SourceEnd)
+        {
+           return (association.TargetEnd != null) ? association.TargetEnd.PropertyName : null;
+        }
+        else if (navigationMember == association.TargetEnd)
+        {
+           return (association.SourceEnd != null) ? association.SourceEnd.PropertyName : null;
+        }
+
+        return null;
+    }
+
+        
+    static string GetTypeStringPresentation(Telerik.OpenAccess.CodeGeneration.CodeTypeElement property, string propertyTypeName)
+    {
+        string propertyType = property.Type;
+        if (!string.IsNullOrEmpty(propertyTypeName))
+        {
+            propertyType = propertyTypeName;
+        }
+        
+        bool isGeneric = false;
+        if (property.UserData.Contains("IsGeneric"))
+        {
+            isGeneric = (bool) property.UserData["IsGeneric"];
+        }
+        if (isGeneric)
+        {
+            bool isNullable = (bool)property.UserData["IsNullable"];
+            if (isNullable)
+            {
+                string genericParameterConstraints = (string)property.UserData["GenericParameters"];
+                string[] parts = 
+                    genericParameterConstraints.Split(new string[]{", "}, StringSplitOptions.RemoveEmptyEntries);
+                string underlyingSystemType = string.Empty;
+                if (parts.Length > 0)
+                {
+                    if (GeneratedTextTransformation.typeDefaultPresentation != null && 
+                        GeneratedTextTransformation.typeDefaultPresentation.TryGetValue(parts[0], out underlyingSystemType))
+                    {
+                        return string.Format("{0}?", underlyingSystemType);
+                    }
+                    return string.Format("System.Nullable(Of {0})", parts[0]);     
+                }
+            }
+            return string.Empty;
+        }
+        else if (property.IsIEnumerable)
+        {
+            if(property.IsIQueryable)
+            {
+                return string.Format("IQueryable(Of {0})",propertyType);
+            }
+            return string.Format("IList(Of {0})", propertyType);
+        }
+
+        string mappedType = string.Empty;
+        if (GeneratedTextTransformation.typeDefaultPresentation.TryGetValue(propertyType, out mappedType))
+        {
+            return mappedType;
+        }
+        return propertyType;
+    }
+
+    /// <summary>
+    /// Generates a Wcf DataContract contract for a given property.
+    /// </summary>
+    /// <param name="property">CodeProperty instance to generate.</param>
+    private void GenerateWcfContract(Telerik.OpenAccess.CodeGeneration.CodeClass @class)
+    {
+        
+        string knownTypeFormat = @"<KnownType(GetType({0}))> _";
+        this.WriteLine(@"<DataContract(IsReference:=True)> _");
+        @class.Properties.ForEach(
+        property => 
+        {
+            if (this.nameService.IsNavigation(property))
+            {
+                this.WriteLine(string.Format(knownTypeFormat, this.nameService.GetDTOName(property.Type)));
+            }
+        });
+        //this.WriteLine(string.Format(knownTypeFormat, this.nameService.GetDTOName(@class.Name)));
+    }
+
+    private PropertyDetail GeneratePropertyDetail(Telerik.OpenAccess.CodeGeneration.CodeProperty property)
+    {
+        string propertyType = this.nameService.IsNavigation(property) ? this.nameService.GetDTOName(property.Type) : null;
+        
+        return new PropertyDetail(property, this.utilities, propertyType);
+    }
+
+    
+
+    private void GenerateNamespaces(List<string> namespaces)
+    {
+        var temp = new System.Collections.Generic.List<string>();
+        temp.AddRange(namespaces);
+        temp.Add("System");
+        temp.Add("System.Linq");
+        temp.Add("System.Linq.Expressions");
+        temp.Add("System.Collections");
+        temp.Add("System.Collections.Generic");
+        temp.Add("System.Runtime.Serialization");
+
+        foreach (string @namespace in temp.Distinct())
+        {
+            string @using = string.Format("Imports {0}", @namespace);
+            this.WriteLine(@using);
+        }
+        this.WriteLine("");
+    }
+        
+    private static Dictionary<string, string> InitializeLanguageDependentTypeMap()
+    {
+        Dictionary<string, string> defaultPresentation = new Dictionary<string, string>();
+        defaultPresentation.Add("System.Nullable`1","?");
+        defaultPresentation.Add("System.Int16", "Short");
+        defaultPresentation.Add("System.Int32", "Integer");
+        defaultPresentation.Add("System.Int64", "Long");
+        defaultPresentation.Add("System.UInt16", "UShort");
+        defaultPresentation.Add("System.UInt32", "UInteger");
+        defaultPresentation.Add("System.UInt64", "ULong");
+        defaultPresentation.Add("System.String", "String");
+        defaultPresentation.Add("System.Byte[]", "Byte()");
+        defaultPresentation.Add("System.Byte", "Byte");
+        defaultPresentation.Add("System.SByte", "SByte");
+        defaultPresentation.Add("System.DateTime", "Date");
+        defaultPresentation.Add("System.Decimal", "Decimal");
+        defaultPresentation.Add("System.Double", "Double");
+        defaultPresentation.Add("System.Single", "Single");
+        defaultPresentation.Add("System.Boolean", "Boolean");
+        defaultPresentation.Add("Int16", "Short");
+        defaultPresentation.Add("Int32", "Integer");
+        defaultPresentation.Add("Int64", "Long");
+        defaultPresentation.Add("UInt16", "UShort");
+        defaultPresentation.Add("UInt32", "UInteger");
+        defaultPresentation.Add("UInt64", "ULong");
+        defaultPresentation.Add("String", "String");
+        defaultPresentation.Add("Byte[]", "Byte()");
+        defaultPresentation.Add("Byte", "Byte");
+        defaultPresentation.Add("SByte", "SByte");
+        defaultPresentation.Add("DateTime", "Date");
+        defaultPresentation.Add("Decimal", "Decimal");
+        defaultPresentation.Add("Double", "Double");
+        defaultPresentation.Add("Single", "Single");
+        defaultPresentation.Add("Boolean", "Boolean");
+        
+        return defaultPresentation;
+    }
+
+    public void AddEntityUsings()
+    {
+        System.Collections.Generic.List<string> namespacesToAdd = new System.Collections.Generic.List<string>();
+        foreach (var @namespace in this.codegenModel.Namespaces)
+        {
+            string name = @namespace.Name;
+            if(!this.namespaces.Contains(name) && !string.IsNullOrEmpty(name))
+            {
+                if (!string.IsNullOrEmpty(this.rootNamespace) &&
+                    name != this.rootNamespace &&
+					name.StartsWith(this.rootNamespace + ".") == false)
+                {
+                    this.namespaces.Add(string.Concat(this.rootNamespace, ".", name));
+                }
+                else
+                {
+                  this.namespaces.Add(name);
+                }
+            }
+            foreach (Telerik.OpenAccess.CodeGeneration.CodeClass type in @namespace.Classes)
+            {
+               foreach (string ns in type.ImportNamespaces.Namespaces)
+                {
+                    if (string.IsNullOrEmpty(this.rootNamespace))
+                    {
+                       string tmp = rootNamespace + "." + ns;
+                       if (!namespacesToAdd.Contains(tmp))
+                           namespacesToAdd.Add(ns);
+                    }
+                }
+            }
+            this.namespaces.AddRange(System.Linq.Enumerable.Distinct<string>(namespacesToAdd));
+        }
+    }
+
+    public void AddUnitOfWorkUsings()
+    {
+        string contextNamespace = this.contextClassInfo.Namespace;
+        if(!string.IsNullOrEmpty(contextNamespace))
+        {
+            this.namespaces.Add(contextNamespace);
+        }
+    }
+    
+    public struct PropertyDetail
+    {
+        // Fields	
+        public bool isPropertyVirtual; 
+        public bool isPropertyAbstract;
+        public bool isPropertyPrivate;
+        public bool areModifiersCompatible;
+        public string accessModifier;
+        public string inheritanceModifier;
+        public string modifiers;
+        public string propertyType;
+        public string errorMessage;
+        public string propertyErrorMessage;
+        public string initialValue;//string.Empty;
+        public string fieldModifier;// "private";
+        public string summary;
+        public bool isFieldAvailable;//false;
+        public string fieldName;//string.Empty;
+        public string propertyName;//string.Empty;
+        public string accessToken;
+        public bool useField;//false;
+        public bool hasGetter;//false;
+        public bool hasSetter;//false;
+        
+        public PropertyDetail(Telerik.OpenAccess.CodeGeneration.CodeProperty property, MetaModelCodeGenUtilities utilities, string propertyType)
+        {
+            this.initialValue = string.Empty;
+            this.fieldModifier = "Private";
+            this.isFieldAvailable = false;
+            this.fieldName = string.Empty;
+            this.propertyName = string.Empty;
+            this.useField = false;
+            
+            this.hasGetter = property.HasGetter;
+            this.hasSetter = property.HasSetter;
+            
+            string readonlyToken = property.HasSetter ? string.Empty : "ReadOnly ";
+            string writeonlyToken = property.HasGetter ? string.Empty : "WriteOnly ";
+            this.accessToken = string.IsNullOrEmpty(readonlyToken) ? writeonlyToken : readonlyToken;
+            
+            this.isPropertyVirtual = (property.PropertyInheritanceModifier == Telerik.OpenAccess.CodeGeneration.MemberInheritanceModifier.None);
+            this.isPropertyAbstract = (property.PropertyInheritanceModifier == Telerik.OpenAccess.CodeGeneration.MemberInheritanceModifier.Abstract);
+            this.isPropertyPrivate = (property.PropertyAccessModifier == Telerik.OpenAccess.CodeGeneration.MemberAccessModifier.Private);
+            this.areModifiersCompatible = !(isPropertyAbstract && isPropertyPrivate);
+            this.accessModifier = utilities.Context.GetMemberAccessModifier(property.PropertyAccessModifier);
+            this.inheritanceModifier =  utilities.GetMemberInheritanceModifier(property.PropertyInheritanceModifier);
+            
+            // private access modifier is not compatible with virtual inheritance modifier
+            // by default the inheritance modifier is None which is handled as virtual
+            if (this.isPropertyPrivate && this.isPropertyVirtual)
+            {
+                this.inheritanceModifier = string.Empty;
+            }
+            this.modifiers = string.Format("{0}{1}",accessModifier, inheritanceModifier);
+            this.propertyType = GeneratedTextTransformation.GetTypeStringPresentation(property, propertyType);
+            
+            this.errorMessage =  string.Empty;
+            this.propertyErrorMessage = string.Empty;
+            this.summary = property.Summary;
+            this.propertyName = property.Name;
+            
+            //if(!this.areModifiersCompatible) 
+            //{
+            //	this.errorMessage =  utilities.Context.GetIncompatibleModifiersErrorMessage(property, this.Host.TemplateFile);
+            //	this.propertyErrorMessage = utilities.Context.GetPropertyErrorMessageForIncompatibleModifiers(property.Name, "private", "abstract");	
+            //}
+            
+            if(!string.IsNullOrEmpty(property.FieldName))
+            {
+                this.isFieldAvailable = true;
+
+                if (property.FieldName.Contains(">k__BackingField"))
+                {
+                   this.fieldName = "_" + property.Name;
+              }
+                else
+                {
+                   this.fieldName = property.FieldName;
+              }
+
+                if(!string.IsNullOrEmpty(property.DefaultValue))
+                {		
+                    this.initialValue = string.Concat("= ", property.DefaultValue);
+                }
+                if(property.UserData.Contains("isFieldProtected") && (bool)property.UserData["isFieldProtected"])
+                {
+                    this.fieldModifier = "Protected";
+                }
+            }
+            this.useField = (!this.isPropertyAbstract && this.isFieldAvailable);
+        }
+    }
+    
+    public class DtoGenerationSessionState
+    {
+        private Dictionary<string, string> assemblers;
+        private Dictionary<string, string> repositories;
+        private Dictionary<string, string> services;
+        private Dictionary<string, string> dtolist;
+        private HashSet<string> classNames = new HashSet<string>();
+
+        private string unitOfWorkInterfaceName;
+        private string dtoWithKeyInterfaceName;
+        private string dtoKeyPropertyName;
+        private string contextName;
+        private string projectNamespace;
+
+        public DtoGenerationSessionState()
+        {
+            this.assemblers = new Dictionary<string, string>();
+            this.repositories = new Dictionary<string, string>();
+            this.services = new Dictionary<string, string>();
+            this.dtolist = new Dictionary<string, string>();
+        }
+
+        public void Initialize(CodeDom model, string projectNamespace, string contextName)
+        {
+            if (model == null)
+            {
+                throw new ArgumentNullException("model");
+            }
+
+            foreach (Telerik.OpenAccess.CodeGeneration.CodeNamespace @namespace in model.Namespaces)
+            {
+                foreach (Telerik.OpenAccess.CodeGeneration.CodeClass @class in @namespace.Classes)
+                {
+                    string name = @class.Name;
+
+                    this.services.Add(name, name + "Service");
+                    this.assemblers.Add(name, name + "Assembler");
+                    this.repositories.Add(name, name + "Repository");
+                    this.dtolist.Add(name, name + "Dto");
+                }
+            }
+
+            this.projectNamespace = projectNamespace;
+            this.contextName = contextName;
+            this.unitOfWorkInterfaceName = "IUnitOfWork";
+            this.dtoWithKeyInterfaceName = "IDtoWithKey";
+            this.dtoKeyPropertyName = "DtoKey";
+
+            this.ExtractClassNames(model);
+        }
+
+
+        public string ProjectNamespace
+        {
+            get
+            {
+                return this.projectNamespace;
+            }
+        }
+        
+        public string ContextName
+        {
+            get
+            {
+                return this.contextName;
+            }
+        }
+        
+        public string ContextFactoryName
+        {
+            get
+            {
+                return string.Concat(this.ContextName, "Factory");
+            }
+        }
+
+        public string DtoNamespace
+        {
+            get
+            {
+                string namespaceExtension = "Dto";
+                if (!string.IsNullOrEmpty(this.ProjectNamespace))
+                {
+                    return string.Format("{0}.{1}", this.ProjectNamespace, namespaceExtension);
+                }
+                return namespaceExtension;
+            }
+        }
+        
+        public string DtoNamespaceVB
+        {
+            get
+            {
+                return "Dto";
+            }
+        }
+
+        public string AssemblersNamespace
+        {
+            get
+            {
+                string namespaceExtension = "Assemblers";
+                if (!string.IsNullOrEmpty(this.ProjectNamespace))
+                {
+                    return string.Format("{0}.{1}", this.ProjectNamespace, namespaceExtension);
+                }
+                return namespaceExtension;
+            }
+        }
+        
+        public string AssemblersNamespaceVB
+        {
+            get
+            {
+                return "Assemblers";
+            }
+        }
+
+        public string RepositoriesNamespace
+        {
+            get
+            {
+                string namespaceExtension = "Repositories";
+                if (!string.IsNullOrEmpty(this.ProjectNamespace))
+                {
+                    return string.Format("{0}.{1}", this.ProjectNamespace, namespaceExtension);
+                }
+                return namespaceExtension;
+            }
+        }
+        
+        public string RepositoriesNamespaceVB
+        {
+            get
+            {
+                return "Repositories";
+            }
+        }
+
+        public string ServicesNamespaces
+        {
+            get
+            {
+                string namespaceExtension = "Services";
+                if (!string.IsNullOrEmpty(this.ProjectNamespace))
+                {
+                    return string.Format("{0}.{1}", this.ProjectNamespace, namespaceExtension);
+                }
+                return namespaceExtension;
+            }
+        }
+        
+        public string ServicesNamespacesVB
+        {
+            get
+            {
+                return "Services";
+            }
+        }
+        
+        public string ConverterNamespace
+        {
+            get
+            {
+                string namespaceExtension = "Converters";
+                if (!string.IsNullOrEmpty(this.ProjectNamespace))
+                {
+                    return string.Format("{0}.{1}", this.ProjectNamespace, namespaceExtension);
+                }
+                return namespaceExtension;
+            }
+        }
+        
+        public string ConverterNamespaceVB
+        {
+            get
+            {
+                return "Converters";
+            }
+        }
+
+        public bool IsPrimitive(Telerik.OpenAccess.CodeGeneration.CodeProperty property)
+        {
+            return !this.IsNavigation(property);
+        }
+
+        public bool IsNavigation(Telerik.OpenAccess.CodeGeneration.CodeProperty property)
+        {
+            return this.IsReference(property) || this.IsCollection(property);
+        }
+
+        public bool IsReference(Telerik.OpenAccess.CodeGeneration.CodeProperty property)
+        {
+            return this.classNames.Contains(property.Type);
+        }
+
+        public bool IsCollection(Telerik.OpenAccess.CodeGeneration.CodeProperty property)
+        {
+            return property.IsIEnumerable;
+        }
+
+
+        public string UnitOfWorkInterfaceName
+        {
+            get
+            {
+                return this.unitOfWorkInterfaceName;
+            }
+        }
+        
+        public string SpecificUnitOfWorkInterfaceName
+        {
+            get			
+            {
+                return string.Concat("I", this.ContextName, "UnitOfWork");
+            }
+        }
+        
+        public string DtoWithKeyInterfaceName
+        {
+            get			
+            {
+                return this.dtoWithKeyInterfaceName;
+            }
+        }
+        
+        public string DtoKeyPropertyName
+        {
+            get			
+            {
+                return this.dtoKeyPropertyName;
+            }
+        }
+
+        public string GetAssemblerInterfaceName(string @class)
+        {
+            return "I" + this.assemblers[@class];
+        }
+
+        public string GetAssemblerName(string @class)
+        {
+            return this.assemblers[@class];
+        }
+
+        public string GetAssemblerBaseName(string @class)
+        {
+            return this.assemblers[@class] + "Base";
+        }
+
+        public string GetRepositoryInterfaceName(string @class)
+        {
+            return "I" + this.repositories[@class];
+        }
+
+        public string GetRepositoryName(string @class)
+        {
+            return this.repositories[@class];
+        }
+
+        public string GetServiceInterfaceName(string @class)
+        {
+            return "I" + this.services[@class];
+        }
+
+        public string GetServiceName(string @class)
+        {
+            return this.services[@class];
+        }
+
+        public string GetServiceBaseName(string @class)
+        {
+            return this.services[@class] + "Base";
+        }
+
+        public string GetDTOName(string @class)
+        {
+            return this.dtolist[@class];
+        }
+
+        public string GetDTOBaseName(string @class)
+        {
+            return this.dtolist[@class] + "Base";
+        }
+
+        private void ExtractClassNames(CodeDom codegenModel)
+        {
+            foreach (Telerik.OpenAccess.CodeGeneration.CodeNamespace @namespace in codegenModel.Namespaces)
+            {
+                foreach (Telerik.OpenAccess.CodeGeneration.CodeClass @class in @namespace.Classes)
+                {
+                    this.classNames.Add(@class.Name);
+                }
+            }
+        }
+    }
+
+    void GeneratePragmaBegin()
+    {
+#>
+'------------------------------------------------------------------------------
+' <auto-generated>
+'     This code was generated by a tool.
+'
+'     Changes to this file may cause incorrect behavior and will be lost if
+'     the code is regenerated.
+' </auto-generated>
+'------------------------------------------------------------------------------
+<#+ 
+    }
+    void GeneratePragmaEnd()
+    {
+    }
+    
+    void GenerateNamespaceBegin()
+    {
+        if (this.ShouldGenerateNamespace())
+        {
+            string nameSpace = this.contextClassInfo.Namespace;
+            string rootNamespace = this.contextClassInfo.RootNamespace;
+            if(nameSpace.StartsWith(rootNamespace) && !string.IsNullOrEmpty(rootNamespace))
+            {
+                nameSpace = nameSpace.Remove(0, rootNamespace.Length + 1);
+            }
+            
+            this.WriteLine(string.Format("Namespace {0}", nameSpace));
+            this.PushIndent("\t");
+        }
+    }
+    
+    bool ShouldGenerateNamespace()
+    {
+        return !(string.IsNullOrEmpty(this.contextClassInfo.Namespace) || this.contextClassInfo.Namespace == this.contextClassInfo.RootNamespace);
+    }
+    
+    void GenerateNamespaceEnd()
+    {
+        if (this.ShouldGenerateNamespace())
+        {
+            this.PopIndent();
+            this.WriteLine("End Namespace");
+        }
+    }
+#>

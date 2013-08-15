@@ -1,0 +1,809 @@
+﻿<#+ 
+	private void GenerateDtos()
+	{
+		foreach (Telerik.OpenAccess.CodeGeneration.CodeNamespace @namespace in this.codegenModel.Namespaces)
+		{
+			foreach (Telerik.OpenAccess.CodeGeneration.CodeClass @class in @namespace.Classes)
+			{
+				this.GenerateDto(@class);
+			}
+		}
+	}
+	
+	private void GenerateServices()
+	{
+		foreach (Telerik.OpenAccess.CodeGeneration.CodeNamespace @namespace in this.codegenModel.Namespaces)
+		{
+			foreach (Telerik.OpenAccess.CodeGeneration.CodeClass @class in @namespace.Classes)
+			{
+				this.GenerateServiceInterface(@class);
+				this.GenerateService(@class);
+			}
+		}
+	}
+	
+	private void GenerateRepositories()
+	{
+		foreach (Telerik.OpenAccess.CodeGeneration.CodeNamespace @namespace in this.codegenModel.Namespaces)
+		{
+			foreach (Telerik.OpenAccess.CodeGeneration.CodeClass @class in @namespace.Classes)
+			{
+				this.GenerateRepositoryInterface(@class);
+				this.GenerateRepository(@class);
+			}
+		}
+	}
+	
+	private void GenerateAssemblers()
+	{
+		foreach (Telerik.OpenAccess.CodeGeneration.CodeNamespace @namespace in this.codegenModel.Namespaces)
+		{
+			foreach (Telerik.OpenAccess.CodeGeneration.CodeClass @class in @namespace.Classes)
+			{
+				this.GenerateAssemblerInterface(@class);
+				this.GenerateBaseAssembler(@class);
+				this.GenerateDerivedAssembler(@class);
+			}
+			 
+		}
+	}
+	
+	private void GenerateDtoWithKeyInterface()
+	{
+#>
+
+Public Interface <#= this.nameService.DtoWithKeyInterfaceName #>
+	Property <#= this.nameService.DtoKeyPropertyName #>() As String
+End Interface
+
+<#+
+	}
+
+	private void GenerateDto(Telerik.OpenAccess.CodeGeneration.CodeClass @class)
+	{
+		
+		this.GenerateWcfContract(@class);
+#>
+Partial Public Class <#= this.nameService.GetDTOName(@class.Name) #> 
+	Implements <#= this.nameService.DtoWithKeyInterfaceName #>
+
+	Public Sub New()
+    End Sub
+	
+	Public Sub New(<#= this.InitializeConstructorParams(@class) #>)
+	<#+
+			this.PushIndent("\t\t");
+			this.Write("\t");
+			@class.Properties.ForEach(
+				property => 
+				{
+					PropertyDetail details = this.GeneratePropertyDetail(property);
+					this.WriteLine(string.Format("Me.{0} = {1}", details.propertyName, details.fieldName));
+				});
+			this.PopIndent();
+	#>
+	End Sub
+	
+	<DataMember()> _
+    Public Overridable Property <#= this.nameService.DtoKeyPropertyName #>() As String Implements <#= this.nameService.DtoWithKeyInterfaceName #>.<#= this.nameService.DtoKeyPropertyName #>
+		Get
+			Return Me._dtoKey
+		End Get
+		Set
+		    Me._dtoKey = value
+		End Set
+	End Property
+	Private _dtoKey As String
+	
+<#+
+    this.GenerateProperties(@class.Properties);
+#>
+End Class
+
+<#+ 
+	}
+	
+	/// <summary>
+	/// Generates the attributes definition.
+	/// </summary>
+	/// <param name="properties">The list of properties.</param>
+	private void GenerateProperties(System.Collections.Generic.IEnumerable<Telerik.OpenAccess.CodeGeneration.CodeProperty> properties)
+	{
+		PushIndent("\t");
+		//ProcessPropertiesIfAutoImplementedSettingIsOn(properties);
+		properties.ForEach(
+			property => 
+			{
+				GenerateProperty(property);
+			});
+
+		PopIndent();
+	}
+	
+	/// <summary>
+	/// Generates a property definition.
+	/// </summary>
+	/// <param name="property">CodeProperty instance to generate.</param>
+	private void GenerateProperty(Telerik.OpenAccess.CodeGeneration.CodeProperty property)
+	{	
+		PropertyDetail details = this.GeneratePropertyDetail(property);		
+		if(!details.areModifiersCompatible) 
+		{
+			details.errorMessage =  utilities.Context.GetIncompatibleModifiersErrorMessage(property, this.Host.TemplateFile);
+			details.propertyErrorMessage = utilities.Context.GetPropertyErrorMessageForIncompatibleModifiers(property.Name, "Private", "MustOverride");
+		}
+			
+		this.GenerateProperty(details);
+	}
+
+	
+/// <summary>
+/// Generates a property definition.
+/// </summary>
+/// <param name="property">CodeProperty instance to generate.</param>
+private void GenerateProperty(PropertyDetail details)
+{
+	//GenerateSummary(details.summary);
+	if (!details.areModifiersCompatible)
+	{
+		this.WriteLine("'TODO: Please, resolve the following error: {0}", details.propertyErrorMessage);
+		this.Error(details.errorMessage);
+	}			
+	//Generates the DataMember attribute.
+    this.WriteLine("<DataMember()> _");
+	
+	// generates the property signature
+	// We never generate auto properties, becasue we want the code to be compatible with 3.5.
+	this.WriteLine(string.Format("{0} Property {1} As {2}", details.modifiers, details.propertyName, details.propertyType));
+	//if (details.useField)
+	{
+		//if(details.hasGetter)
+		{
+#>
+	Get
+	    Return Me.<#= details.fieldName #>
+	End Get
+<#+
+		}
+		//if(details.hasSetter)
+		{
+#>
+	Set
+	    Me.<#= details.fieldName #> = value
+	End Set
+<#+			 
+		}
+		this.WriteLine("End Property");
+		this.WriteLine(string.Format("{0} {1} As {2}", details.fieldModifier, details.fieldName, details.propertyType));
+	}
+	//else
+	//{
+	//	this.Write(" ");
+	//}
+	this.WriteLine(string.Empty);
+}
+
+	private void GenerateUnitOfWorkDerivateInterface()
+	{
+#>
+Public Interface <#= this.nameService.SpecificUnitOfWorkInterfaceName #>
+		Inherits <#= this.nameService.UnitOfWorkInterfaceName #>
+<#+
+		this.WriteLine(string.Empty);
+		this.PushIndent("\t");
+		foreach (KeyValuePair<string, string> endpoint in this.contextClassInfo.Endpoints)
+		{
+			
+			string format = "ReadOnly Property {0}() As IQueryable(Of {1})";
+			string property = string.Format(format, endpoint.Value, endpoint.Key);
+			this.WriteLine(property);
+			this.WriteLine("");
+		}
+		this.PopIndent();
+#>
+End Interface
+<#+	
+		this.WriteLine(string.Empty);
+	}
+		
+	private void GenerateContextPartial()
+	{
+#>
+Partial Public Class <#= this.contextClassInfo.Name #>
+        Implements <#= this.nameService.SpecificUnitOfWorkInterfaceName #>
+<#+
+	this.WriteLine(string.Empty);
+	this.PushIndent("\t");
+	foreach (KeyValuePair<string, string> endpoint in this.contextClassInfo.Endpoints)
+	{
+#>
+Public ReadOnly Property Reroute_<#= endpoint.Value #> As System.Linq.IQueryable(Of <#= endpoint.Key #>) Implements <#= this.nameService.SpecificUnitOfWorkInterfaceName #>.<#= endpoint.Value #>
+    Get
+        Return Me.<#= endpoint.Value #>
+    End Get
+End Property
+<#+
+		this.WriteLine(string.Empty);
+	}
+	this.PopIndent();
+#>
+	Public Sub Reroute_Add(entity As Object) Implements <#= this.nameService.UnitOfWorkInterfaceName #>.Add
+        Me.Add(entity)
+    End Sub
+
+    Public Sub Reroute_ClearChanges() Implements <#= this.nameService.UnitOfWorkInterfaceName #>.ClearChanges
+        Me.ClearChanges()
+    End Sub
+
+    Public Sub Reroute_Delete(entity As Object) Implements <#= this.nameService.UnitOfWorkInterfaceName #>.Delete
+        Me.Delete(entity)
+    End Sub
+
+    Public Function Reroute_GetAll(Of T)() As System.Linq.IQueryable(Of T) Implements <#= this.nameService.UnitOfWorkInterfaceName #>.GetAll
+        Return Me.GetAll(Of T)()
+    End Function
+
+    Public Function Reroute_GetObjectByKey(Of T)(key As Telerik.OpenAccess.ObjectKey) As T Implements <#= this.nameService.UnitOfWorkInterfaceName #>.GetObjectByKey
+        Return CType(Me.GetObjectByKey(key), T)
+    End Function
+
+    Public Sub Reroute_SaveChanges() Implements <#= this.nameService.UnitOfWorkInterfaceName #>.SaveChanges
+        Me.SaveChanges()
+    End Sub
+End Class
+<#+
+		this.WriteLine(string.Empty);
+	}
+	
+	private void GenerateContextFactory()
+	{
+#>
+Public Class <#= this.nameService.ContextFactoryName #>
+	Private Shared instance_ As <#= this.nameService.ContextFactoryName #>
+	Public Shared Property Instance() As <#= this.nameService.ContextFactoryName #>
+		Get
+			If <#= this.nameService.ContextFactoryName #>.instance_ Is Nothing Then
+				<#= this.nameService.ContextFactoryName #>.instance_ = New <#= this.nameService.ContextFactoryName #>()
+			End If
+			Return <#= this.nameService.ContextFactoryName #>.instance_
+		End Get
+		Set(ByVal value As <#= this.nameService.ContextFactoryName #>)
+			<#= this.nameService.ContextFactoryName #>.instance_ = value
+		End Set
+	End Property
+
+	Public Overridable Function GetContextPerRequest() As <#= this.nameService.SpecificUnitOfWorkInterfaceName #>
+		Dim _httpContext As HttpContext = HttpContext.Current
+		If _httpContext Is Nothing Then
+			Return New <#= this.contextClassInfo.Name #>()
+		Else
+			Dim contextId As Integer = Thread.CurrentContext.ContextID
+			Dim hashCode As Integer = _httpContext.GetHashCode()
+			Dim key As String = String.Concat(hashCode, contextId)
+
+			Dim context As <#= this.nameService.SpecificUnitOfWorkInterfaceName #> = TryCast(_httpContext.Items(key), <#= this.nameService.SpecificUnitOfWorkInterfaceName #>)
+			If context Is Nothing Then
+				context = New <#= this.contextClassInfo.Name #>()
+				_httpContext.Items(key) = context
+			End If
+			Return context
+		End If
+	End Function
+End Class
+<#+
+		this.WriteLine(string.Empty);
+	}
+	
+	private void GenerateRepositoryInterface()
+	{	
+#>
+
+Public Interface IRepository(Of TEntity)
+	Sub Add(ByVal entity As TEntity)
+	Sub Remove(ByVal entity As TEntity)
+
+	Function [Get](ByVal objectKey As ObjectKey) As TEntity
+
+	Function GetAll() As IQueryable(Of TEntity)
+
+	Function Find(ByVal predicate As Expression(Of Func(Of TEntity, Boolean))) As IQueryable(Of TEntity)
+End Interface
+<#+
+	}
+	
+	private void GenerateRepositoryBase()
+	{
+#>
+
+Partial Public Class Repository(Of TEntity As Class)
+	Implements IRepository(Of TEntity)
+	Protected unitOfWork As IUnitOfWork
+
+	Public Sub New(ByVal unitOfWork As IUnitOfWork)
+		Me.unitOfWork = unitOfWork
+	End Sub
+
+	Public Sub Add(ByVal entity As TEntity) Implements IRepository(Of TEntity).Add
+		Me.unitOfWork.Add(entity)
+	End Sub
+
+	Public Sub Remove(ByVal entity As TEntity) Implements IRepository(Of TEntity).Remove
+		Me.unitOfWork.Delete(entity)
+	End Sub
+
+	Public Function GetAll() As IQueryable(Of TEntity) Implements IRepository(Of TEntity).GetAll
+		Return Me.unitOfWork.GetAll(Of TEntity)()
+	End Function
+
+	Public Function [Get](ByVal _objectKey As ObjectKey) As TEntity Implements IRepository(Of TEntity).Get
+		Return Me.unitOfWork.GetObjectByKey(Of TEntity)(_objectKey)
+	End Function
+
+	Public Function Find(ByVal predicate As Expression(Of Func(Of TEntity, Boolean))) As IQueryable(Of TEntity) Implements IRepository(Of TEntity).Find
+		Return Me.unitOfWork.GetAll(Of TEntity)().Where(predicate)
+	End Function
+End Class
+<#+	
+	}
+	
+	private void GenerateRepositoryInterface(Telerik.OpenAccess.CodeGeneration.CodeClass @class)
+	{
+#>
+
+Public Interface  <#= this.nameService.GetRepositoryInterfaceName(@class.Name) #>
+	Inherits IRepository(Of <#= @class.Name #>)
+
+End Interface
+<#+
+	}
+	
+	private void GenerateRepository(Telerik.OpenAccess.CodeGeneration.CodeClass @class)
+	{
+#>
+
+Partial Public Class <#= this.nameService.GetRepositoryName(@class.Name) #>
+	Inherits Repository(Of <#= @class.Name #>)
+	Implements <#= this.nameService.GetRepositoryInterfaceName(@class.Name) #>
+	
+	Public Sub New(ByVal unitOfWork As <#= this.nameService.SpecificUnitOfWorkInterfaceName #>)
+		MyBase.New(unitOfWork)
+	End Sub
+End Class
+<#+ 
+
+	}
+	
+	private void GenerateServiceInterface()
+	{	
+#>
+
+Public Interface IService(Of TDto As <#= this.nameService.DtoWithKeyInterfaceName #>, TEntity As Class)
+	ReadOnly Property Assembler() As IAssembler(Of TDto, TEntity)
+	ReadOnly Property Repository() As IRepository(Of TEntity)
+
+	Function Find(ByVal filter As Expression(Of Func(Of TEntity, Boolean))) As IEnumerable(Of TDto)
+	Function GetAll() As IEnumerable(Of TDto)
+
+	Function Find(ByVal startRowIndex As Integer, ByVal maximumRows As Integer) As IEnumerable(Of TDto)
+	Function Find(ByVal sortExpression As String, ByVal filterExpression As String) As IEnumerable(Of TDto)
+	Function Find(ByVal startRowIndex? As Integer, ByVal maximumRows? As Integer, ByVal sortExpression As String, ByVal filterExpression As String) As IEnumerable(Of TDto)
+
+	Function Count() As Integer
+	Function Count(ByVal filterExpression As String) As Integer
+
+	Function GetByKey(ByVal dtoKey As String) As TDto
+	Function Add(ByVal dto As TDto) As String
+	Sub Update(ByVal dto As TDto)
+	Sub Delete(ByVal dto As TDto)
+End Interface
+<#+
+	}
+	
+	private void GenerateServiceBase()
+	{
+#>
+
+Public MustInherit Partial Class Service(Of TDto As <#= this.nameService.DtoWithKeyInterfaceName #>, TEntity As Class)
+	Implements IService(Of TDto, TEntity)
+
+    Private _assembler As IAssembler(Of TDto, TEntity)
+	Private _repository As IRepository(Of TEntity)
+
+	Public Sub New(ByVal assembler As IAssembler(Of TDto, TEntity), ByVal repository As IRepository(Of TEntity))
+		Me._assembler = assembler
+		Me._repository = repository
+	End Sub
+
+	Public ReadOnly Property Assembler() As IAssembler(Of TDto, TEntity) Implements IService(Of TDto, TEntity).Assembler
+		Get
+			Return Me._assembler
+		End Get
+	End Property
+
+	Public ReadOnly Property Repository() As IRepository(Of TEntity) Implements IService(Of TDto, TEntity).Repository
+		Get
+			Return Me._repository
+		End Get
+	End Property
+
+	Public Overridable Function GetAll() As IEnumerable(Of TDto) Implements IService(Of TDto, TEntity).GetAll
+		Return Me._assembler.Assemble(Me.Repository.GetAll())
+	End Function
+
+	Public Overridable Function Find(ByVal filter As Expression(Of Func(Of TEntity, Boolean))) As IEnumerable(Of TDto) Implements IService(Of TDto, TEntity).Find
+		Return Me.Assembler.Assemble(Me.Repository.Find(filter))
+	End Function
+
+	Public Overridable Function Find(ByVal startRowIndex As Integer, ByVal maximumRows As Integer) As IEnumerable(Of TDto) Implements IService(Of TDto, TEntity).Find
+		Return Me.Find(startRowIndex, maximumRows, Nothing, Nothing)
+	End Function
+
+	Public Overridable Function Find(ByVal sortExpression As String, ByVal filterExpression As String) As IEnumerable(Of TDto) Implements IService(Of TDto, TEntity).Find
+		Return Me.Find(Nothing, Nothing, sortExpression, filterExpression)
+	End Function
+
+	Public Overridable Function Find(ByVal startRowIndex? As Integer, ByVal maximumRows? As Integer, ByVal sortExpression As String, ByVal filterExpression As String) As IEnumerable(Of TDto) Implements IService(Of TDto, TEntity).Find
+		Dim query As IQueryable(Of TEntity) = Me.Repository.GetAll()
+
+		If Not String.IsNullOrEmpty(filterExpression) Then
+			query = query.Where(filterExpression)
+		End If
+		If Not String.IsNullOrEmpty(sortExpression) Then
+			query = query.OrderBy(sortExpression)
+		End If
+		If startRowIndex.HasValue Then
+			query = query.Skip(startRowIndex.Value)
+		End If
+		If maximumRows.HasValue Then
+			query = query.Take(maximumRows.Value)
+		End If
+
+		Return Me.Assembler.Assemble(query)
+	End Function
+
+	Public Overridable Function Count() As Integer Implements IService(Of TDto, TEntity).Count
+		Return Me.Count(String.Empty)
+	End Function
+
+	Public Overridable Function Count(ByVal filterExpression As String) As Integer Implements IService(Of TDto, TEntity).Count
+		Dim query As IQueryable(Of TEntity) = Me.Repository.GetAll()
+
+		If Not String.IsNullOrEmpty(filterExpression) Then
+			query = query.Where(filterExpression)
+		End If
+
+		Return query.Count()
+	End Function
+
+
+	Public Overridable Function GetByKey(ByVal _dtoKey As String) As TDto Implements IService(Of TDto, TEntity).GetByKey
+		Dim key As ObjectKey = KeyUtility.Instance.Convert(Of TEntity)(_dtoKey)
+		
+		Return Me._assembler.Assemble(Me.Repository.Get(key))
+	End Function
+
+	Public Overridable Function Add(ByVal dto As TDto) As String Implements IService(Of TDto, TEntity).Add
+		Dim entity As TEntity = Me._assembler.Assemble(Nothing, dto)
+		
+		Me._repository.Add(entity)
+		Dim key As ObjectKey = KeyUtility.Instance.Create(entity)
+
+		Return KeyUtility.Instance.Convert(key)
+	End Function
+
+	Public Overridable Sub Update(ByVal dto As TDto) Implements IService(Of TDto, TEntity).Update
+		Dim key As ObjectKey = KeyUtility.Instance.Convert(Of TEntity)(dto.<#= this.nameService.DtoKeyPropertyName #>)
+		
+		Dim entity As TEntity = Me._repository.Get(key)
+
+		Me._assembler.Assemble(entity, dto)
+	End Sub
+
+	Public Overridable Sub Delete(ByVal dto As TDto) Implements IService(Of TDto, TEntity).Delete
+		Dim key As ObjectKey = KeyUtility.Instance.Convert(Of TEntity)(dto.<#= this.nameService.DtoKeyPropertyName #>)
+		Dim entity As TEntity = Me._repository.Get(key)
+
+		Me.Repository.Remove(entity)
+	End Sub
+End Class
+<#+	
+	}
+	
+	private void GenerateServiceInterface(Telerik.OpenAccess.CodeGeneration.CodeClass @class)
+	{
+#>
+
+Public Interface <#= this.nameService.GetServiceInterfaceName(@class.Name) #>
+	Inherits IService(Of <#= this.nameService.GetDTOName(@class.Name) #>, <#= @class.Name #>)
+
+End Interface
+<#+
+	}
+	
+	private void GenerateService(Telerik.OpenAccess.CodeGeneration.CodeClass @class)
+	{
+#>
+
+Partial Public Class <#= this.nameService.GetServiceName(@class.Name) #>
+	Inherits Service(Of <#= this.nameService.GetDTOName(@class.Name) #>, <#= @class.Name #>)
+	Implements <#= this.nameService.GetServiceInterfaceName(@class.Name) #>
+	Public Sub New(ByVal assembler As <#= this.nameService.GetAssemblerInterfaceName(@class.Name) #>, ByVal repository As <#= this.nameService.GetRepositoryInterfaceName(@class.Name) #>)
+		MyBase.New(assembler, repository)
+
+	End Sub
+End Class
+<#+ 
+
+	}
+	
+		private void GenerateBaseAssembler()
+	{	
+		#>
+		
+Public Interface IAssembler(Of TDto, TEntity As Class)
+	Function Assemble(ByVal entity As TEntity) As TDto
+	Function Assemble(ByVal entity As TEntity, ByVal dto As TDto) As TEntity
+
+	Function Assemble(ByVal entityList As IEnumerable(Of TEntity)) As IEnumerable(Of TDto)
+	Function Assemble(ByVal dtoList As IEnumerable(Of TDto)) As IEnumerable(Of TEntity)
+End Interface
+
+Public MustInherit Class Assembler(Of TDto, TEntity As Class)
+	Implements IAssembler(Of TDto, TEntity)
+	Public MustOverride Function Assemble(ByVal domainEntity As TEntity) As TDto Implements IAssembler(Of TDto, TEntity).Assemble
+	Public MustOverride Function Assemble(ByVal entity As TEntity, ByVal dto As TDto) As TEntity Implements IAssembler(Of TDto, TEntity).Assemble
+
+	Public Sub AssembleNavigational(ByVal entity As TEntity, ByVal dto As TDto)
+		Me.AssembleReferences(entity, dto)
+    	Me.AssembleCollections(entity, dto)
+    End Sub
+
+    Public MustOverride Sub AssembleReferences(ByVal entity As TEntity, ByVal dto As TDto)
+    Public MustOverride Sub AssembleCollections(ByVal entity As TEntity, ByVal dto As TDto)
+
+
+	Public Overridable Function Assemble(ByVal domainEntityList As IEnumerable(Of TEntity)) As IEnumerable(Of TDto) Implements IAssembler(Of TDto, TEntity).Assemble
+		Dim dtos As List(Of TDto) = Activator.CreateInstance(Of List(Of TDto))()
+		For Each domainEntity As TEntity In domainEntityList
+			dtos.Add(Assemble(domainEntity))
+		Next domainEntity
+		Return dtos
+	End Function
+
+	Public Overridable Function Assemble(ByVal dtoList As IEnumerable(Of TDto)) As IEnumerable(Of TEntity) Implements IAssembler(Of TDto, TEntity).Assemble
+		Dim domainEntities As List(Of TEntity) = Activator.CreateInstance(Of List(Of TEntity))()
+		For Each dto As TDto In dtoList
+			domainEntities.Add(Assemble(Nothing, dto))
+		Next dto
+		Return domainEntities
+	End Function
+End Class
+
+<#+
+	}
+	
+		private void GenerateAssemblerInterface(Telerik.OpenAccess.CodeGeneration.CodeClass @class)
+	{
+#>
+
+Public Interface <#= this.nameService.GetAssemblerInterfaceName(@class.Name) #>
+	Inherits IAssembler(Of <#= this.nameService.GetDTOName(@class.Name) #>, <#= @class.Name #>)
+
+End Interface
+<#+
+	}
+	
+	private void GenerateBaseAssembler(Telerik.OpenAccess.CodeGeneration.CodeClass @class)
+	{
+#>
+
+Partial Public Class <#= this.nameService.GetAssemblerBaseName(@class.Name) #>
+	Inherits Assembler(Of <#= this.nameService.GetDTOName(@class.Name) #>, <#= @class.Name #>)
+
+	''' <summary>
+	''' Invoked after the <#= this.nameService.GetDTOName(@class.Name) #> instance is assembled.
+	''' </summary>
+	''' <param name="dto"><see cref="<#= this.nameService.GetDTOName(@class.Name) #>"/> The Dto instance.</param>
+	Partial Private Sub OnDTOAssembled(ByVal dto As <#= this.nameService.GetDTOName(@class.Name) #>)
+	End Sub
+
+	''' <summary>
+	''' Invoked after the <#= @class.Name #> instance is assembled.
+	''' </summary>
+	''' <param name="entity">The <see cref="<#= @class.Name #>"/> instance.</param>
+	Partial Private Sub OnEntityAssembled(ByVal entity As <#= @class.Name #>)
+	End Sub
+	
+	Public Overrides Function Assemble(ByVal entity As <#= @class.Name #>, ByVal dto As <#= this.nameService.GetDTOName(@class.Name) #>) As <#= @class.Name #>
+		If entity Is Nothing Then
+			entity = New <#= @class.Name #>()
+		End If
+
+<#+
+		foreach (Telerik.OpenAccess.CodeGeneration.CodeProperty @property in @class.Properties)
+		{
+			if(this.nameService.IsPrimitive(@property) && @property.HasSetter)
+			{
+				this.PushIndent("\t\t");
+				this.WriteLine(string.Format("entity.{0} = dto.{0}", @property.Name));
+				this.PopIndent();
+			}
+		}
+#>
+        Me.OnEntityAssembled(entity)
+        Return entity
+   	End Function
+	
+	Public Overrides Function Assemble(ByVal entity As <#= @class.Name #>) As  <#= this.nameService.GetDTOName(@class.Name) #>
+		Dim dto As New  <#= this.nameService.GetDTOName(@class.Name) #>()
+
+<#+
+		this.PushIndent("\t\t");
+		this.WriteLine("Dim key As ObjectKey = KeyUtility.Instance.Create(entity)");
+		this.WriteLine(string.Format("dto.{0} = KeyUtility.Instance.Convert(key)", this.nameService.DtoKeyPropertyName));
+		this.PopIndent();
+		foreach (Telerik.OpenAccess.CodeGeneration.CodeProperty property in @class.Properties)
+		{
+			if(this.nameService.IsPrimitive(property))
+			{
+				this.PushIndent("\t\t");
+				this.WriteLine(string.Format("dto.{0} = entity.{0}", @property.Name));
+				this.PopIndent();
+			}
+		}
+#>
+		
+		Me.OnDTOAssembled(dto)
+		Return dto
+	End Function
+
+	Public Overrides Sub AssembleReferences(ByVal entity As <#= @class.Name #>, ByVal dto As <#= this.nameService.GetDTOName(@class.Name) #>)
+<#+ 
+		var assemblersUsedForReferences = new System.Collections.Generic.HashSet<string>();
+        foreach (Telerik.OpenAccess.CodeGeneration.CodeProperty @property in @class.Properties)
+		{
+			var propertyDetail = this.GeneratePropertyDetail(@property);
+			if(this.nameService.IsReference(@property) && !this.nameService.IsCollection(@property))
+			{
+				this.PushIndent("\t\t");
+
+				string initializeCollection = string.Format("dto.{0} = new {1}()", propertyDetail.propertyName, propertyDetail.propertyType.Remove(0, 1));
+				
+				
+				string propertyType = @property.Type; 
+				string assemblerName = this.nameService.GetAssemblerName(propertyType);
+				string assemblerVariable = string.Concat(Char.ToLowerInvariant(assemblerName[0]), assemblerName.Remove(0, 1));
+
+				string initializeAssembler = string.Format("Dim {1} = new {0}()", assemblerName, assemblerVariable);
+				if(!assemblersUsedForReferences.Contains(assemblerVariable))
+				{
+					this.WriteLine(initializeAssembler);
+					assemblersUsedForReferences.Add(assemblerVariable);
+				}
+				
+				string populateReference = string.Format("dto.{0} = {1}.Assemble(entity.{2})", propertyDetail.propertyName, assemblerVariable, propertyDetail.propertyName);
+				this.WriteLine(populateReference);
+				this.WriteLine(string.Empty);
+				this.PopIndent();
+			}
+		}
+#>
+    End Sub
+
+	Public Overrides Sub AssembleCollections(ByVal entity As <#= @class.Name #>, ByVal dto As <#= this.nameService.GetDTOName(@class.Name) #>)
+<#+ 
+		var assemblersUsed = new System.Collections.Generic.HashSet<string>();
+        foreach (Telerik.OpenAccess.CodeGeneration.CodeProperty @property in @class.Properties)
+		{
+			var propertyDetail = this.GeneratePropertyDetail(@property);
+			if(this.nameService.IsCollection(@property))
+			{
+				this.PushIndent("\t\t");
+
+				string initializeCollection = string.Format("dto.{0} = new {1}()", propertyDetail.propertyName, propertyDetail.propertyType.Remove(0, 1));
+				
+				
+				string propertyType = @property.Type; 
+				string assemblerName = this.nameService.GetAssemblerName(propertyType);
+				string assemblerVariable = string.Concat(Char.ToLowerInvariant(assemblerName[0]), assemblerName.Remove(0, 1));
+
+				string initializeAssembler = string.Format("Dim {1} = new {0}()", assemblerName, assemblerVariable);
+				if(!assemblersUsed.Contains(assemblerVariable))
+				{
+					this.WriteLine(initializeAssembler);
+					assemblersUsed.Add(assemblerVariable);
+				}
+				this.WriteLine(string.Empty);
+
+				this.WriteLine(initializeCollection);
+#>
+For Each item As <#= propertyType #> In entity.<#= propertyDetail.propertyName #>
+	Dim dtoItem = <#= assemblerVariable #>.Assemble(item)
+<#+
+				string inverseField = this.associationEnds[@class.Name][@property.Name];
+				if(!string.IsNullOrEmpty(inverseField))
+				{
+					string inverseFieldAssign = string.Format("dtoItem.{0} = dto", inverseField);
+					this.PushIndent("\t");
+					this.WriteLine(inverseFieldAssign);
+					this.PopIndent();
+				}
+#>
+	dto.<#= propertyDetail.propertyName #>.Add(dtoItem)
+Next
+
+<#+				
+				this.WriteLine(string.Empty);
+				this.PopIndent();
+				
+			}
+		}
+#>
+    End Sub
+End Class
+
+<#+
+	}
+
+
+	
+	private void GenerateDerivedAssembler(Telerik.OpenAccess.CodeGeneration.CodeClass @class)
+	{
+#>
+
+Partial Public Class <#= this.nameService.GetAssemblerName(@class.Name) #>
+	Inherits <#= this.nameService.GetAssemblerBaseName(@class.Name) #>
+	Implements <#= this.nameService.GetAssemblerInterfaceName(@class.Name) #>
+
+End Class
+<#+ 
+
+	}
+	
+	private void GenerateConverter()
+	{
+#>
+Public Class KeyUtility
+    Private Shared _instance As KeyUtility
+    Public Shared Property Instance() As KeyUtility
+        Get
+            If KeyUtility._instance Is Nothing Then
+                KeyUtility._instance = New KeyUtility()
+            End If
+            Return KeyUtility._instance
+        End Get
+        Friend Set(ByVal value As KeyUtility)
+            KeyUtility._instance = value
+        End Set
+    End Property
+
+    Public Overridable Function Convert(ByVal key As ObjectKey) As String
+        Dim converter As TypeConverter = TypeDescriptor.GetConverter(GetType(ObjectKey))
+        Return converter.ConvertTo(key, GetType(String)).ToString()
+    End Function
+
+    Public Overridable Function Convert(Of T)(ByVal key As String) As ObjectKey
+        Try
+            If Regex.IsMatch(key, "\[.*?\](,\[.*?\])?|.?=.?") Then
+                Dim converter As TypeConverter = TypeDescriptor.GetConverter(GetType(ObjectKey))
+                Dim _objectKey As ObjectKey = TryCast(converter.ConvertFrom(key), ObjectKey)
+                _objectKey.TypeName = GetType(T).FullName
+                Return _objectKey
+            Else
+                Return New ObjectKey(GetType(T).FullName, key)
+            End If
+        Catch ex As Exception
+            Throw New InvalidOperationException(String.Format("An object key cannot be resolved from string {0}", key), ex)
+        End Try
+    End Function
+
+    Public Overridable Function Create(ByVal entity As Object) As ObjectKey
+		Return ObjectKey.Create(entity)
+		' If need to pass versioning information back and forth 
+		' you can use the following method to create an ObjectKey.
+		'return ObjectKey.CreateWithVersion(entity);
+    End Function
+End Class
+<#+
+	}
+#>
